@@ -1,5 +1,4 @@
 import tensorflow as tf
-from tensorflow.contrib.framework.python.ops import add_arg_scope, arg_scope # pylint: disable=E0611
 from tensorflow.contrib.layers import variance_scaling_initializer # pylint: disable=E0611
 import numpy as np
 
@@ -23,11 +22,9 @@ def int_shape(x):
 # wrapper tf.get_variable, augmented with 'init' functionality
 # Get variable with data dependent init
 
-
-@add_arg_scope
-def get_variable_ddi(name, shape, initial_value, dtype=tf.float32, init=False, trainable=True):
-    w = tf.get_variable(name, shape, dtype, None, trainable=trainable)
-    if init:
+def get_variable_ddi_(name, shape, initial_value, is_training, dtype=tf.float32):
+    w = tf.get_variable(name, shape, dtype, None)
+    if is_training:
         w = w.assign(initial_value)
         with tf.control_dependencies([w]):
             return w
@@ -36,43 +33,36 @@ def get_variable_ddi(name, shape, initial_value, dtype=tf.float32, init=False, t
 # Activation normalization
 # Convenience function that does centering+scaling
 
-
-@add_arg_scope
-def actnorm(name, x, scale=1., logdet=None, logscale_factor=3., batch_variance=False, reverse=False, init=False, trainable=True):
-    if arg_scope([get_variable_ddi], trainable=trainable):
-        if not reverse:
-            x = actnorm_center(name+"_center", x, reverse)
-            x = actnorm_scale(name+"_scale", x, scale, logdet,
-                              logscale_factor, batch_variance, reverse, init)
-            if logdet != None:
-                x, logdet = x
-        else:
-            x = actnorm_scale(name + "_scale", x, scale, logdet,
-                              logscale_factor, batch_variance, reverse, init)
-            if logdet != None:
-                x, logdet = x
-            x = actnorm_center(name+"_center", x, reverse)
+def actnorm_(name, x, scale=1., logdet=None, logscale_factor=3., batch_variance=False, reverse=False, is_training = False):
+    if not reverse:
+        x = actnorm_center_(name+"_center", x, reverse=reverse, is_training=is_training)
+        x = actnorm_scale_(name+"_scale", x, scale, logdet, logscale_factor, batch_variance, reverse=reverse, is_training=is_training)
         if logdet != None:
-            return x, logdet
-        return x
+            x, logdet = x
+    else:
+        x = actnorm_scale_(name + "_scale", x, scale, logdet, logscale_factor, batch_variance, reverse = reverse, is_training=is_training)
+        if logdet != None:
+            x, logdet = x
+        x = actnorm_center_(name+"_center", x, reverse=reverse, is_training=is_training)
+    if logdet != None:
+        return x, logdet
+    return x
 
 # Activation normalization
-
-
-@add_arg_scope
-def actnorm_center(name, x, reverse=False):
+def actnorm_center_(name, x, is_training, reverse=False):
     shape = x.get_shape()
     with tf.variable_scope(name):
         assert len(shape) == 2 or len(shape) == 4
         if len(shape) == 2:
-            x_mean = tf.reduce_mean(x, [0], keepdims=True)
-            b = get_variable_ddi(
-                "b", (1, int_shape(x)[1]), initial_value=-x_mean)
+            x_mean = None
+            if is_training:
+                x_mean = -1.0 * tf.reduce_mean(x, [0], keepdims=True)                
+            b = get_variable_ddi_("b", (1, int_shape(x)[1]), initial_value=x_mean, is_training=is_training)
         elif len(shape) == 4:
-            x_mean = tf.reduce_mean(x, [0, 1, 2], keepdims=True)
-            b = get_variable_ddi(
-                "b", (1, 1, 1, int_shape(x)[3]), initial_value=-x_mean)
-
+            x_mean = None
+            if is_training:
+                x_mean = -1.0 * tf.reduce_mean(x, [0, 1, 2], keepdims=True)
+            b = get_variable_ddi_("b", (1, 1, 1, int_shape(x)[3]), initial_value=x_mean, is_training=is_training)
         if not reverse:
             x += b
         else:
@@ -81,48 +71,43 @@ def actnorm_center(name, x, reverse=False):
         return x
 
 # Activation normalization
-
-
-@add_arg_scope
-def actnorm_scale(name, x, scale=1., logdet=None, logscale_factor=3., batch_variance=False, reverse=False, init=False, trainable=True):
+def actnorm_scale_(name, x, scale=1., logdet=None, logscale_factor=3., batch_variance=False, reverse=False, is_training = False):
     shape = x.get_shape()
-    with tf.variable_scope(name), arg_scope([get_variable_ddi], trainable=trainable): # pylint: disable=E1129
+    with tf.variable_scope(name): # pylint: disable=E1129
         assert len(shape) == 2 or len(shape) == 4
-        if len(shape) == 2:
-            x_var = tf.reduce_mean(x**2, [0], keepdims=True)
+        
+        if len(shape) == 2:            
             logdet_factor = 1
             _shape = (1, int_shape(x)[1])
 
-        elif len(shape) == 4:
-            x_var = tf.reduce_mean(x**2, [0, 1, 2], keepdims=True)
+        elif len(shape) == 4:            
             logdet_factor = int(shape[1])*int(shape[2])
             _shape = (1, 1, 1, int_shape(x)[3])
 
-        if batch_variance:
-            x_var = tf.reduce_mean(x**2, keepdims=True)
 
-        if init and False:
-            # MPI all-reduce
-            x_var = allreduce_mean(x_var)
-            # Somehow this also slows down graph when not initializing
-            # (it's not optimized away?)
-
-        if True:
-            logs = get_variable_ddi("logs", _shape, initial_value=tf.log(
-                scale/(tf.sqrt(x_var)+1e-6))/logscale_factor)*logscale_factor
-            if not reverse:
-                x = x * tf.exp(logs)
-            else:
-                x = x * tf.exp(-logs)
+        x_var = None
+        init_val = None
+        if is_training:
+            if len(shape) == 2:
+                x_var = tf.reduce_mean(x**2, [0], keepdims=True)
+            elif len(shape) == 4:
+                x_var = tf.reduce_mean(x**2, [0, 1, 2], keepdims=True)
+            if batch_variance:
+                x_var = tf.reduce_mean(x**2, keepdims=True)
+            init_val = tf.log(scale/(tf.sqrt(x_var)+1e-6))/logscale_factor
+        
+        logs = get_variable_ddi_("logs", _shape, initial_value=init_val, is_training=is_training)*logscale_factor
+        if not reverse:
+            x = x * tf.exp(logs)
         else:
-            # Alternative, doesn't seem to do significantly worse or better than the logarithmic version above
-            s = get_variable_ddi("s", _shape, initial_value=scale /
-                                 (tf.sqrt(x_var) + 1e-6) / logscale_factor)*logscale_factor
-            logs = tf.log(tf.abs(s))
-            if not reverse:
-                x *= s
-            else:
-                x /= s
+            x = x * tf.exp(-logs)
+
+        #s = get_variable_ddi("s", _shape, initial_value=scale / (tf.sqrt(x_var) + 1e-6) / logscale_factor)*logscale_factor
+        #logs = tf.log(tf.abs(s))
+        #if not reverse:
+        #    x *= s
+        #else:
+        #    x /= s
 
         if logdet != None:
             dlogdet = tf.reduce_sum(logs) * logdet_factor
@@ -133,10 +118,7 @@ def actnorm_scale(name, x, scale=1., logdet=None, logscale_factor=3., batch_vari
         return x
 
 # Linear layer with layer norm
-
-
-@add_arg_scope
-def linear(name, x, width, do_weightnorm=True, do_actnorm=True, initializer=None, scale=1.):
+def linear_(name, x, width, do_weightnorm=True, do_actnorm=True, initializer=None, scale=1., is_training = False):
     initializer = initializer or default_initializer()
     with tf.variable_scope(name):
         n_in = int(x.get_shape()[1])
@@ -148,13 +130,10 @@ def linear(name, x, width, do_weightnorm=True, do_actnorm=True, initializer=None
         x += tf.get_variable("b", [1, width],
                              initializer=tf.zeros_initializer())
         if do_actnorm:
-            x = actnorm("actnorm", x, scale)
+            x = actnorm_("actnorm", x, scale, is_training=is_training)
         return x
 
 # Linear layer with zero init
-
-
-@add_arg_scope
 def linear_zeros(name, x, width, logscale_factor=3):
     with tf.variable_scope(name):
         n_in = int(x.get_shape()[1])
@@ -201,8 +180,7 @@ def add_edge_padding(x, filter_size):
     return x
 
 
-@add_arg_scope
-def conv2d(name, x, width, filter_size=[3, 3], stride=[1, 1], pad="SAME", do_weightnorm=False, do_actnorm=True, context1d=None, skip=1, edge_bias=True):
+def conv2d_(name, x, width, filter_size=[3, 3], stride=[1, 1], pad="SAME", do_weightnorm=False, do_actnorm=True, context1d=None, edge_bias=True, is_training = False):
     with tf.variable_scope(name):
         if edge_bias and pad == "SAME":
             x = add_edge_padding(x, filter_size)
@@ -216,25 +194,20 @@ def conv2d(name, x, width, filter_size=[3, 3], stride=[1, 1], pad="SAME", do_wei
                             initializer=default_initializer())
         if do_weightnorm:
             w = tf.nn.l2_normalize(w, [0, 1, 2])
-        if skip == 1:
-            x = tf.nn.conv2d(x, w, stride_shape, pad, data_format='NHWC')
-        else:
-            assert stride[0] == 1 and stride[1] == 1
-            x = tf.nn.atrous_conv2d(x, w, skip, pad)
+        
+        x = tf.nn.conv2d(x, w, stride_shape, pad, data_format='NHWC')
+
         if do_actnorm:
-            x = actnorm("actnorm", x)
+            x = actnorm_("actnorm", x, is_training=is_training)
         else:
             x += tf.get_variable("b", [1, 1, 1, width],
                                  initializer=tf.zeros_initializer())
 
         if context1d != None:
-            x += tf.reshape(linear("context", context1d,
-                                   width), [-1, 1, 1, width])
+            x += tf.reshape(linear_("context", context1d, width, is_training=is_training), [-1, 1, 1, width])
     return x
 
-
-@add_arg_scope
-def separable_conv2d(name, x, width, filter_size=[3, 3], stride=[1, 1], padding="SAME", do_actnorm=True, std=0.05):
+def separable_conv2d_(name, x, width, filter_size=[3, 3], stride=[1, 1], padding="SAME", do_actnorm=True, std=0.05, is_training = False):
     n_in = int(x.get_shape()[3])
     with tf.variable_scope(name):
         assert filter_size[0] % 2 == 1 and filter_size[1] % 2 == 1
@@ -250,15 +223,13 @@ def separable_conv2d(name, x, width, filter_size=[3, 3], stride=[1, 1], padding=
         x = tf.nn.separable_conv2d(
             x, w1, w2, strides, padding, data_format='NHWC')
         if do_actnorm:
-            x = actnorm("actnorm", x)
+            x = actnorm_("actnorm", x, is_training=is_training)
         else:
             x += tf.get_variable("b", [1, 1, 1, width],
                                  initializer=tf.zeros_initializer(std))
 
     return x
 
-
-@add_arg_scope
 def conv2d_zeros(name, x, width, filter_size=[3, 3], stride=[1, 1], pad="SAME", logscale_factor=3, skip=1, edge_bias=True):
     with tf.variable_scope(name):
         if edge_bias and pad == "SAME":
@@ -465,3 +436,48 @@ def _symmetric_matrix_square_root(mat, eps=1e-10):
     # This is unlike Numpy which returns v = V^T
     return tf.matmul(
         tf.matmul(u, tf.diag(si)), v, transpose_b=True)
+
+class ConvolutionalBatchNormalizer(object):
+  """Helper class that groups the normalization logic and variables.        
+
+  Use:                                                                      
+      ewma = tf.train.ExponentialMovingAverage(decay=0.99)                  
+      bn = ConvolutionalBatchNormalizer(depth, 0.001, ewma, True)           
+      update_assignments = bn.get_assigner()                                
+      x = bn.normalize(y, train=training?)                                  
+      (the output x will be batch-normalized).                              
+  """
+
+  def __init__(self, depth, epsilon, ewma_trainer, scale_after_norm):
+    self.mean = tf.Variable(tf.constant(0.0, shape=[depth]),
+                            trainable=False)
+    self.variance = tf.Variable(tf.constant(1.0, shape=[depth]),
+                                trainable=False)
+    self.beta = tf.Variable(tf.constant(0.0, shape=[depth]))
+    self.gamma = tf.Variable(tf.constant(1.0, shape=[depth]))
+    self.ewma_trainer = ewma_trainer
+    self.epsilon = epsilon
+    self.scale_after_norm = scale_after_norm
+
+  def get_assigner(self):
+    """Returns an EWMA apply op that must be invoked after optimization."""
+    return self.ewma_trainer.apply([self.mean, self.variance])
+
+  def normalize(self, x, train=True):
+    """Returns a batch-normalized version of x."""
+    if train:
+      mean, variance = tf.nn.moments(x, [0, 1, 2])
+      assign_mean = self.mean.assign(mean)
+      assign_variance = self.variance.assign(variance)
+      with tf.control_dependencies([assign_mean, assign_variance]):
+        return tf.nn.batch_norm_with_global_normalization(
+            x, mean, variance, self.beta, self.gamma,
+            self.epsilon, self.scale_after_norm)
+    else:
+      mean = self.ewma_trainer.average(self.mean)
+      variance = self.ewma_trainer.average(self.variance)
+      local_beta = tf.identity(self.beta)
+      local_gamma = tf.identity(self.gamma)
+      return tf.nn.batch_norm_with_global_normalization(
+          x, mean, variance, local_beta, local_gamma,
+          self.epsilon, self.scale_after_norm)

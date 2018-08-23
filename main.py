@@ -57,7 +57,7 @@ def model_fn(features, labels, mode, params):
         ########### 
         # PREDICT #
         ###########    
-        generated_images = model.sample(y)        
+        generated_images = model.sample(y, is_training=False)        
         predictions = {
             'generated_images': generated_images
         }
@@ -65,8 +65,9 @@ def model_fn(features, labels, mode, params):
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)    
     real_images = features['real_images']
-    with ops.arg_scope([ops.get_variable_ddi, ops.actnorm], init=True):
-        f_loss, _ = model.f_loss(real_images, y, is_training)
+    
+    #with ops.arg_scope([ops.get_variable_ddi, ops.actnorm], init=True):
+    f_loss, _ = model.f_loss(real_images, y, is_training)
 
     if mode == tf.estimator.ModeKeys.TRAIN:
         #########
@@ -209,9 +210,9 @@ if __name__ == "__main__":
                         help="Minibatch size")
     parser.add_argument("--optimizer", type=str,
                         default="adam", help="adam or adamax")
-    parser.add_argument("--lr", type=float, default=0.001,
+    parser.add_argument("--lr", type=float, default=0.0001,
                         help="Base learning rate")
-    parser.add_argument("--warmup", type=float, default=20000.0,
+    parser.add_argument("--warmup", type=float, default=2000.0,
                         help="Warmup steps")
     parser.add_argument("--beta1", type=float, default=.98, help="Adam beta1")
     parser.add_argument("--adam_eps", type=float, default=10e-4, help="Adam eps")
