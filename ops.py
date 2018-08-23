@@ -118,7 +118,7 @@ def actnorm_scale(name, x, scale=1., logdet=None, logscale_factor=3., batch_vari
             # Alternative, doesn't seem to do significantly worse or better than the logarithmic version above
             s = get_variable_ddi("s", _shape, initial_value=scale /
                                  (tf.sqrt(x_var) + 1e-6) / logscale_factor)*logscale_factor
-            logs = tf.log(tf.abs(s) + 1e-6)
+            logs = tf.log(tf.abs(s))
             if not reverse:
                 x *= s
             else:

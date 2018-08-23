@@ -188,7 +188,7 @@ def invertible_1x1_conv(name, z, logdet, reverse=False):
             w = tf.get_variable("W", dtype=tf.float32, initializer=w_init) + tf.eye(shape[3]) * 10e-4            
 
             # dlogdet = tf.linalg.LinearOperator(w).log_abs_determinant() * shape[1]*shape[2]
-            dlogdet = tf.cast(tf.log(1e-6 + abs(tf.matrix_determinant(
+            dlogdet = tf.cast(tf.log(abs(tf.matrix_determinant(
                 tf.cast(w, 'float64')))), 'float32') * shape[1]*shape[2]
 
             if not reverse:
@@ -225,7 +225,7 @@ def invertible_1x1_conv(name, z, logdet, reverse=False):
             np_p, np_l, np_u = scipy.linalg.lu(np_w) # pylint: disable=E1101
             np_s = np.diag(np_u)
             np_sign_s = np.sign(np_s)
-            np_log_s = np.log(1e-6 + abs(np_s))
+            np_log_s = np.log(abs(np_s))
             np_u = np.triu(np_u, k=1)
 
             p = tf.get_variable("P", initializer=np_p, trainable=False)

@@ -7,6 +7,7 @@ from tensorflow.contrib.tpu.python.tpu import tpu_estimator  # pylint: disable=E
 from tensorflow.contrib.tpu.python.tpu import tpu_optimizer  # pylint: disable=E0611
 from tensorflow.python.estimator import estimator  # pylint: disable=E0611
 import math
+import ops 
 
 import celeba
 global dataset
@@ -63,8 +64,9 @@ def model_fn(features, labels, mode, params):
         return tpu_estimator.TPUEstimatorSpec(mode=mode, predictions=predictions)
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)    
-    real_images = features['real_images']    
-    f_loss, _ = model.f_loss(real_images, y, is_training)    
+    real_images = features['real_images']
+    with ops.arg_scope([ops.get_variable_ddi, ops.actnorm], init=True):
+        f_loss, _ = model.f_loss(real_images, y, is_training)
 
     if mode == tf.estimator.ModeKeys.TRAIN:
         #########
@@ -129,8 +131,7 @@ def write_images(images, filename):
     file_obj = tf.gfile.Open(filename, 'w')
     img.save(file_obj, format='png')    
     
-def main(cfg):    
-
+def main(cfg):
     tpu_cluster_resolver = None
     
     if cfg.use_tpu:
@@ -208,9 +209,9 @@ if __name__ == "__main__":
                         help="Minibatch size")
     parser.add_argument("--optimizer", type=str,
                         default="adam", help="adam or adamax")
-    parser.add_argument("--lr", type=float, default=0.0005,
+    parser.add_argument("--lr", type=float, default=0.001,
                         help="Base learning rate")
-    parser.add_argument("--warmup", type=float, default=500.0,
+    parser.add_argument("--warmup", type=float, default=20000.0,
                         help="Warmup steps")
     parser.add_argument("--beta1", type=float, default=.98, help="Adam beta1")
     parser.add_argument("--adam_eps", type=float, default=10e-4, help="Adam eps")
@@ -220,9 +221,9 @@ if __name__ == "__main__":
                         help="Weight decay. Switched off by default.")
 
     # Model hyperparams:
-    parser.add_argument("--width", type=int, default=64,
+    parser.add_argument("--width", type=int, default=128,
                         help="Width of hidden layers")
-    parser.add_argument("--depth", type=int, default=3,
+    parser.add_argument("--depth", type=int, default=2,
                         help="Depth of network")
     parser.add_argument("--weight_y", type=float, default=0.00,
                         help="Weight of log p(y|x) in weighted loss")
