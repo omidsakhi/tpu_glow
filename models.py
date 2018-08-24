@@ -46,7 +46,7 @@ def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
 
         if not reverse:
 
-            #z, logdet = ops.actnorm_("actnorm", z, logdet=logdet, is_training=is_training)
+            z, logdet = ops.scale_bias("actnorm", z, logdet=logdet)
 
             if cfg.flow_permutation == 0:
                 z = ops.reverse_features("reverse", z)
@@ -61,9 +61,9 @@ def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
             z2 = z[:, :, :, n_z // 2:]
 
             if cfg.flow_coupling == 0:
-                z2 += f_("f1", z1, cfg.width, is_training=is_training)
+                z2 += f_("f1", z1, cfg, is_training=is_training)
             elif cfg.flow_coupling == 1:
-                h = f_("f1", z1, cfg.width, n_z, is_training=is_training)
+                h = f_("f1", z1, cfg, n_z, is_training=is_training)
                 shift = h[:, :, :, 0::2]
                 # scale = tf.exp(h[:, :, :, 1::2])
                 scale = tf.nn.sigmoid(h[:, :, :, 1::2] + 2.)
@@ -81,9 +81,9 @@ def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
             z2 = z[:, :, :, n_z // 2:]
 
             if cfg.flow_coupling == 0:
-                z2 -= f_("f1", z1, cfg.width, is_training=is_training)
+                z2 -= f_("f1", z1, cfg, is_training=is_training)
             elif cfg.flow_coupling == 1:
-                h = f_("f1", z1, cfg.width, n_z, is_training=is_training)
+                h = f_("f1", z1, cfg, n_z, is_training=is_training)
                 shift = h[:, :, :, 0::2]
                 # scale = tf.exp(h[:, :, :, 1::2])
                 scale = tf.nn.sigmoid(h[:, :, :, 1::2] + 2.)
@@ -105,16 +105,22 @@ def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
             else:
                 raise Exception()
 
-            #z, logdet = ops.actnorm_("actnorm", z, logdet=logdet, reverse=True, is_training=is_training)
+            z, logdet = ops.scale_bias("actnorm", z, logdet=logdet, reverse=True)
 
     return z, logdet
 
-def f_(name, h, width, n_out=None, is_training = False):
+def f_(name, h, cfg, n_out=None, is_training = False):
+    width = cfg.width
+    if width == -1:
+        assert(int(h.get_shape()[1]) == int(h.get_shape()[2]))
+        n_hw = int(h.get_shape()[2])
+        hw_map = {1: 512, 2: 512, 4: 512, 8: 256, 16: 256, 32: 256, 64: 128, 128: 64}
+        width = hw_map[n_hw]
     n_out = n_out or int(h.get_shape()[3])
     with tf.variable_scope(name):
-        h = tf.nn.relu(ops.conv2d_("l_1", h, width, is_training=is_training))
-        h = tf.nn.relu(ops.conv2d_("l_2", h, width, filter_size=[1, 1], is_training=is_training))
-        h = ops.conv2d_zeros("l_last", h, n_out)
+        h = ops._conv2d("l_1", h, width, 3, 1, is_training, relu=True)        
+        #h = ops._conv2d("l_2", h, width, 1, 1, is_training, relu=True)
+        h = ops._conv2d("l_3", h, n_out, 3, 1, is_training, relu=False, init_zero=True)        
     return h
 
 def split2d(name, z, objective=0.):
@@ -148,7 +154,7 @@ def split2d_reverse(name, z, eps, eps_std):
 def split2d_prior(z):
     n_z2 = int(z.get_shape()[3])
     n_z1 = n_z2
-    h = ops.conv2d_zeros("conv", z, 2 * n_z1)
+    h = ops._conv2d_with_bias(z, 2 * n_z1, kernel_size=3, stride=1, name= "conv")
 
     mean = h[:, :, :, 0::2]
     logs = h[:, :, :, 1::2]
@@ -200,7 +206,7 @@ def invertible_1x1_conv(name, z, logdet, reverse=False):
                                  'SAME', data_format='NHWC')
                 logdet -= dlogdet
 
-                return z, logdet
+                return z, logdet 
 
     else:
 
@@ -280,11 +286,10 @@ def prior(name, y_onehot, cfg):
         n_z = cfg.top_shape[-1]
 
         h = tf.zeros([tf.shape(y_onehot)[0]]+cfg.top_shape[:2]+[2*n_z])
-        if cfg.learntop:
-            h = ops.conv2d_zeros('p', h, 2*n_z)
+        if cfg.learntop:                        
+            h = ops._conv2d('p', h, 2*n_z, 3, 1, True)
         if cfg.ycond:
-            h += tf.reshape(ops.linear_zeros("y_emb", y_onehot,
-                                           2*n_z), [-1, 1, 1, 2 * n_z])
+            h += tf.reshape(ops.dense("y_emb", y_onehot, 2*n_z, True, init_zero=True), [-1, 1, 1, 2 * n_z])
 
         pz = ops.gaussian_diag(h[:, :, :, :n_z], h[:, :, :, n_z:])
 
@@ -350,7 +355,7 @@ class model(object):
 
                 # Classification loss
                 h_y = tf.reduce_mean(z, axis=[1, 2])
-                y_logits = ops.linear_zeros("classifier", h_y, self.cfg.n_y)
+                y_logits = ops.dense("classifier", h_y, self.cfg.n_y, is_training, has_bn=False)
                 bits_y = tf.nn.softmax_cross_entropy_with_logits_v2(
                     labels=y_onehot, logits=y_logits) / np.log(2.)
 
@@ -368,8 +373,7 @@ class model(object):
         bits_x, bits_y, pred_loss = self._f_loss(x, y, is_training)
         local_loss = bits_x + self.cfg.weight_y * bits_y
         stats = [local_loss, bits_x, bits_y, pred_loss]
-        global_stats = ops.allreduce_mean(
-            tf.stack([tf.reduce_mean(i) for i in stats]))
+        global_stats = tf.reduce_mean(tf.stack([tf.reduce_mean(i) for i in stats]))
         return tf.reduce_mean(local_loss), global_stats
 
     # === Sampling function

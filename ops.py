@@ -5,274 +5,49 @@ import numpy as np
 BATCH_NORM_DECAY = 0.9
 BATCH_NORM_EPSILON = 1e-5
 
-def allreduce_sum(x):
-    return tf.reduce_sum(x)
-
-def allreduce_mean(x):
-    return tf.reduce_mean(x)
-
-def default_initial_value(shape, std=0.01):
-    return tf.random_normal(shape, 0., std)
-
-def default_initializer(std=0.01):
-    return tf.random_normal_initializer(0., std)
-
 def int_shape(x):
     if str(x.get_shape()[0]) != '?':
         return list(map(int, x.get_shape()))
     return [-1]+list(map(int, x.get_shape()[1:]))
 
-# wrapper tf.get_variable, augmented with 'init' functionality
-# Get variable with data dependent init
-
-def get_variable_ddi_(name, shape, initial_value, is_training, dtype=tf.float32):
-    w = tf.get_variable(name, shape, dtype, None, trainable=is_training)
-    if is_training:
-        w = w.assign(initial_value)
-        with tf.control_dependencies([w]):
-            return w
-    return w
-
-# Activation normalization
-# Convenience function that does centering+scaling
-
-def actnorm_(name, x, scale=1., logdet=None, logscale_factor=3., batch_variance=False, reverse=False, is_training = False):
-    if not reverse:
-        x = actnorm_center_(name+"_center", x, reverse=reverse, is_training=is_training)
-        x = actnorm_scale_(name+"_scale", x, scale, logdet, logscale_factor, batch_variance, reverse=reverse, is_training=is_training)
-        if logdet != None:
-            x, logdet = x
-    else:
-        x = actnorm_scale_(name + "_scale", x, scale, logdet, logscale_factor, batch_variance, reverse = reverse, is_training=is_training)
-        if logdet != None:
-            x, logdet = x
-        x = actnorm_center_(name+"_center", x, reverse=reverse, is_training=is_training)
-    if logdet != None:
-        return x, logdet
-    return x
-
-# Activation normalization
-def actnorm_center_(name, x, is_training, reverse=False):
-    shape = x.get_shape()
+def dense(name, inputs, channels, is_training, has_bn=True, init_zero=False, relu=False):
     with tf.variable_scope(name):
-        assert len(shape) == 2 or len(shape) == 4
-        if len(shape) == 2:
-            x_mean = None
-            if is_training:
-                x_mean = -1.0 * tf.reduce_mean(x, [0], keepdims=True)                
-            b = get_variable_ddi_("b", (1, int_shape(x)[1]), initial_value=x_mean, is_training=is_training and not reverse)
-        elif len(shape) == 4:
-            x_mean = None
-            if is_training:
-                x_mean = -1.0 * tf.reduce_mean(x, [0, 1, 2], keepdims=True)
-            b = get_variable_ddi_("b", (1, 1, 1, int_shape(x)[3]), initial_value=x_mean, is_training=is_training and not reverse)
-        if not reverse:
-            x += b
-        else:
-            x -= b
-
-        return x
-
-# Activation normalization
-def actnorm_scale_(name, x, scale=1., logdet=None, logscale_factor=3., batch_variance=False, reverse=False, is_training = False):
-    shape = x.get_shape()
-    with tf.variable_scope(name): # pylint: disable=E1129
-        assert len(shape) == 2 or len(shape) == 4
-        
-        if len(shape) == 2:            
-            logdet_factor = 1
-            _shape = (1, int_shape(x)[1])
-
-        elif len(shape) == 4:            
-            logdet_factor = int(shape[1])*int(shape[2])
-            _shape = (1, 1, 1, int_shape(x)[3])
+        inputs = tf.layers.dense(inputs, channels,bias_initializer=None,use_bias=False,kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),name=name)
+        if has_bn:
+            inputs = batch_norm_relu("actnorm", inputs, is_training, relu=relu, init_zero=init_zero)
+        return inputs
 
 
-        x_var = None
-        init_val = None
-        if is_training:
-            if len(shape) == 2:
-                x_var = tf.reduce_mean(x**2, [0], keepdims=True)
-            elif len(shape) == 4:
-                x_var = tf.reduce_mean(x**2, [0, 1, 2], keepdims=True)
-            if batch_variance:
-                x_var = tf.reduce_mean(x**2, keepdims=True)
-            init_val = tf.log(scale/(tf.sqrt(x_var)+1e-6))/logscale_factor
-        
-        logs = get_variable_ddi_("logs", _shape, initial_value=init_val, is_training=is_training and not reverse)*logscale_factor
-        if not reverse:
-            x = x * tf.exp(logs)
-        else:
-            x = x * tf.exp(-logs)
-
-        #s = get_variable_ddi("s", _shape, initial_value=scale / (tf.sqrt(x_var) + 1e-6) / logscale_factor)*logscale_factor
-        #logs = tf.log(tf.abs(s))
-        #if not reverse:
-        #    x *= s
-        #else:
-        #    x /= s
-
-        if logdet != None:
-            dlogdet = tf.reduce_sum(logs) * logdet_factor
-            if reverse:
-                dlogdet *= -1
-            return x, logdet + dlogdet
-
-        return x
-
-# Linear layer with layer norm
-def linear_(name, x, width, do_weightnorm=True, do_actnorm=True, initializer=None, scale=1., is_training = False):
-    initializer = initializer or default_initializer()
+def dense_with_bias(inputs, channels, name):
     with tf.variable_scope(name):
-        n_in = int(x.get_shape()[1])
-        w = tf.get_variable("W", [n_in, width],
-                            tf.float32, initializer=initializer)
-        if do_weightnorm:
-            w = tf.nn.l2_normalize(w, [0])
-        x = tf.matmul(x, w)
-        x += tf.get_variable("b", [1, width],
-                             initializer=tf.zeros_initializer())
-        if do_actnorm:
-            x = batch_norm_relu("actnorm", x, is_training, relu=False)            
-        return x
+        return tf.layers.dense(
+            inputs, channels,
+            bias_initializer=tf.zeros_initializer(),
+            use_bias=True,
+            kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
+            name=name)
 
-# Linear layer with zero init
-def linear_zeros(name, x, width, logscale_factor=3):
+def _conv2d(name, inputs, filters, kernel_size, stride, is_training, init_zero=False, relu=False):
     with tf.variable_scope(name):
-        n_in = int(x.get_shape()[1])
-        w = tf.get_variable("W", [n_in, width], tf.float32,
-                            initializer=default_initializer())
-        x = tf.matmul(x, w)
-        x += tf.get_variable("b", [1, width],
-                             initializer=tf.zeros_initializer())
-        return x
+        inputs = tf.layers.conv2d(
+        inputs, filters, [kernel_size, kernel_size],
+        strides=[stride, stride], padding='same',
+        bias_initializer=tf.zeros_initializer(),
+        use_bias=True,
+        kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
+        name=name)
+        inputs = batch_norm_relu("actnorm", inputs, is_training, relu=relu, init_zero=init_zero)        
+    return inputs
 
-# Slow way to add edge padding
-
-
-def add_edge_padding(x, filter_size):
-    assert filter_size[0] % 2 == 1
-    if filter_size[0] == 1 and filter_size[1] == 1:
-        return x
-    a = (filter_size[0] - 1) // 2  # vertical padding size
-    b = (filter_size[1] - 1) // 2  # horizontal padding size
-    if True:
-        x = tf.pad(x, [[0, 0], [a, a], [b, b], [0, 0]])
-        ix = int_shape(x)[1:3]        
-        name = "_".join([str(dim) for dim in [a, b, ix[0], ix[1] ]])        
-        pads = tf.get_collection(name)
-        if not pads:
-            pad = np.zeros([1] + int_shape(x)[1:3] + [1], dtype='float32')
-            pad[:, :a, :, 0] = 1.
-            pad[:, -a:, :, 0] = 1.
-            pad[:, :, :b, 0] = 1.
-            pad[:, :, -b:, 0] = 1.
-            pad = tf.convert_to_tensor(pad)
-            tf.add_to_collection(name, pad)
-        else:
-            pad = pads[0]
-        pad = tf.tile(pad, [tf.shape(x)[0], 1, 1, 1])
-        x = tf.concat([x, pad], axis=3)
-    else:
-        pad = tf.pad(tf.zeros_like(x[:, :, :, :1]) - 1,
-                     [[0, 0], [a, a], [b, b], [0, 0]]) + 1
-        x = tf.pad(x, [[0, 0], [a, a], [b, b], [0, 0]])
-        x = tf.concat([x, pad], axis=3)
-    return x
-
-
-def conv2d_(name, x, width, filter_size=[3, 3], stride=[1, 1], pad="SAME", do_weightnorm=False, do_actnorm=True, context1d=None, edge_bias=True, is_training = False):
+def _conv2d_with_bias(inputs, filters, kernel_size, stride, name):
     with tf.variable_scope(name):
-        if edge_bias and pad == "SAME":
-            x = add_edge_padding(x, filter_size)
-            pad = 'VALID'
-
-        n_in = int(x.get_shape()[3])
-
-        stride_shape = [1] + stride + [1]
-        filter_shape = filter_size + [n_in, width]
-        w = tf.get_variable("W", filter_shape, tf.float32,
-                            initializer=default_initializer())
-        if do_weightnorm:
-            w = tf.nn.l2_normalize(w, [0, 1, 2])
-        
-        x = tf.nn.conv2d(x, w, stride_shape, pad, data_format='NHWC')
-
-        if do_actnorm:            
-            x = batch_norm_relu("actnorm", x, is_training, relu=False)            
-        else:
-            x += tf.get_variable("b", [1, 1, 1, width],
-                                 initializer=tf.zeros_initializer())
-
-        if context1d != None:
-            x += tf.reshape(linear_("context", context1d, width, is_training=is_training), [-1, 1, 1, width])
-    return x
-
-def separable_conv2d_(name, x, width, filter_size=[3, 3], stride=[1, 1], padding="SAME", do_actnorm=True, std=0.05, is_training = False):
-    n_in = int(x.get_shape()[3])
-    with tf.variable_scope(name):
-        assert filter_size[0] % 2 == 1 and filter_size[1] % 2 == 1
-        strides = [1] + stride + [1]
-        w1_shape = filter_size + [n_in, 1]
-        w1_init = np.zeros(w1_shape, dtype='float32')
-        w1_init[(filter_size[0]-1)//2, (filter_size[1]-1)//2, :,
-                :] = 1.  # initialize depthwise conv as identity
-        w1 = tf.get_variable("W1", dtype=tf.float32, initializer=w1_init)
-        w2_shape = [1, 1, n_in, width]
-        w2 = tf.get_variable("W2", w2_shape, tf.float32,
-                             initializer=default_initializer(std))
-        x = tf.nn.separable_conv2d(
-            x, w1, w2, strides, padding, data_format='NHWC')
-        if do_actnorm:
-            x = batch_norm_relu("actnorm", x, is_training, relu=False)            
-        else:
-            x += tf.get_variable("b", [1, 1, 1, width],
-                                 initializer=tf.zeros_initializer(std))
-
-    return x
-
-def conv2d_zeros(name, x, width, filter_size=[3, 3], stride=[1, 1], pad="SAME", logscale_factor=3, skip=1, edge_bias=True):
-    with tf.variable_scope(name):
-        if edge_bias and pad == "SAME":
-            x = add_edge_padding(x, filter_size)
-            pad = 'VALID'
-
-        n_in = int(x.get_shape()[3])
-        stride_shape = [1] + stride + [1]
-        filter_shape = filter_size + [n_in, width]
-        w = tf.get_variable("W", filter_shape, tf.float32,
-                            initializer=default_initializer())
-        if skip == 1:
-            x = tf.nn.conv2d(x, w, stride_shape, pad, data_format='NHWC')
-        else:
-            assert stride[0] == 1 and stride[1] == 1
-            x = tf.nn.atrous_conv2d(x, w, skip, pad)
-        x += tf.get_variable("b", [1, 1, 1, width],
-                             initializer=tf.zeros_initializer())        
-    return x
-
-
-# 2X nearest-neighbour upsampling, also inspired by Jascha Sohl-Dickstein's code
-def upsample2d_nearest_neighbour(x):
-    shape = x.get_shape()
-    n_batch = int(shape[0])
-    height = int(shape[1])
-    width = int(shape[2])
-    n_channels = int(shape[3])
-    x = tf.reshape(x, (n_batch, height, 1, width, 1, n_channels))
-    x = tf.concat(2, [x, x])
-    x = tf.concat(4, [x, x])
-    x = tf.reshape(x, (n_batch, height*2, width*2, n_channels))
-    return x
-
-
-def upsample(x, factor=2):
-    shape = x.get_shape()
-    height = int(shape[1])
-    width = int(shape[2])
-    x = tf.image.resize_nearest_neighbor(x, [height * factor, width * factor])
-    return x
-
+        return tf.layers.conv2d(
+            inputs, filters, [kernel_size, kernel_size],
+            strides=[stride, stride], padding='same',
+            bias_initializer=None,
+            use_bias=False,
+            kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
+            name=name)
 
 def squeeze2d(x, factor=2):
     assert factor >= 1
@@ -314,8 +89,6 @@ def reverse_features(name, h, reverse=False):
     return h[:, :, :, ::-1]
 
 # Shuffle across the channel dimension
-
-
 def shuffle_features(name, h, indices=None, return_indices=False, reverse=False):
     with tf.variable_scope(name):
 
@@ -354,14 +127,6 @@ def shuffle_features(name, h, indices=None, return_indices=False, reverse=False)
         if return_indices:
             return h, indices
         return h
-
-
-def embedding(name, y, n_y, width):
-    with tf.variable_scope(name):
-        params = tf.get_variable(
-            "embedding", [n_y, width], initializer=default_initializer())
-        embeddings = tf.gather(params, y)
-        return embeddings
 
 # Random variables
 
@@ -417,7 +182,6 @@ def gaussian_diag(mean, logsd):
 #    sample = (tf.floor(sample / binsize) * binsize - mean) / scale
 #    logp = tf.log(tf.sigmoid(sample + binsize / scale) - tf.sigmoid(sample) + 1e-7)
 #    return tf.reduce_sum(logp, [1, 2, 3])
-
 def discretized_logistic(mean, logscale, binsize=1. / 256):
     class o(object):
         pass
@@ -455,48 +219,54 @@ def _symmetric_matrix_square_root(mat, eps=1e-10):
     return tf.matmul(
         tf.matmul(u, tf.diag(si)), v, transpose_b=True)
 
-class ConvolutionalBatchNormalizer(object):
-  """Helper class that groups the normalization logic and variables.        
+def scale_bias(name, x, scale_factor=1., logdet=None, logscale_factor=3., reverse=False):
+    with tf.variable_scope(name):
+        if not reverse:
+            x = bias("bias", x, reverse)
+            x = scale("scale", x, scale_factor, logdet, logscale_factor, reverse)
+            if logdet != None:
+                x, logdet = x
+        else:
+            x = scale("scale", x, scale_factor, logdet, logscale_factor, reverse)
+            if logdet != None:
+                x, logdet = x
+            x = bias("bias", x, reverse)
+        if logdet != None:
+            return x, logdet
+        return x
 
-  Use:                                                                      
-      ewma = tf.train.ExponentialMovingAverage(decay=0.99)                  
-      bn = ConvolutionalBatchNormalizer(depth, 0.001, ewma, True)           
-      update_assignments = bn.get_assigner()                                
-      x = bn.normalize(y, train=training?)                                  
-      (the output x will be batch-normalized).                              
-  """
-
-  def __init__(self, depth, axis, epsilon, ewma_trainer, scale_after_norm):
-    self.axis = axis
-    self.mean = tf.Variable(tf.constant(0.0, shape=[depth]),
-                            trainable=False)
-    self.variance = tf.Variable(tf.constant(1.0, shape=[depth]),
-                                trainable=False)
-    self.beta = tf.Variable(tf.constant(0.0, shape=[depth]))
-    self.gamma = tf.Variable(tf.constant(1.0, shape=[depth]))
-    self.ewma_trainer = ewma_trainer
-    self.epsilon = epsilon
-    self.scale_after_norm = scale_after_norm
-
-  def get_assigner(self):
-    """Returns an EWMA apply op that must be invoked after optimization."""
-    return self.ewma_trainer.apply([self.mean, self.variance])
-
-  def normalize(self, x, train=True):
-    """Returns a batch-normalized version of x."""
-    if train:
-      mean, variance = tf.nn.moments(x, self.axis)
-      assign_mean = self.mean.assign(mean)
-      assign_variance = self.variance.assign(variance)
-      with tf.control_dependencies([assign_mean, assign_variance]):
-        return tf.nn.batch_norm_with_global_normalization(
-            x, mean, variance, self.beta, self.gamma,
-            self.epsilon, self.scale_after_norm)
+def bias(name, x, reverse=False):
+    shape = x.get_shape()
+    assert len(shape) == 2 or len(shape) == 4
+    if len(shape) == 2:
+        _shape = (1, int_shape(x)[1])
+    elif len(shape) == 4:
+        _shape = (1, 1, 1, int_shape(x)[3])        
+    b = tf.get_variable(name, _shape, dtype=tf.float32, initializer=tf.zeros_initializer())
+    if not reverse:
+        x += b
     else:
-      mean = self.ewma_trainer.average(self.mean)
-      variance = self.ewma_trainer.average(self.variance)
-      local_beta = tf.identity(self.beta)
-      local_gamma = tf.identity(self.gamma)
-      return tf.nn.batch_norm_with_global_normalization(
-          x, mean, variance, local_beta, local_gamma,
-          self.epsilon, self.scale_after_norm)
+        x -= b
+    return x
+
+def scale(name, x, scale=1., logdet=None, logscale_factor=3., reverse=False):
+    shape = x.get_shape()
+    assert len(shape) == 2 or len(shape) == 4
+    if len(shape) == 2:
+        _shape = (1, int_shape(x)[1])
+        logdet_factor = 1
+    elif len(shape) == 4:
+        _shape = (1, 1, 1, int_shape(x)[3])
+        logdet_factor = int(shape[1])*int(shape[2])    
+    s = tf.get_variable(name, _shape, initializer=tf.ones_initializer())
+    logs = tf.log(tf.abs(s))
+    if not reverse:
+        x *= s
+    else:
+        x /= s
+    if logdet != None:
+        dlogdet = tf.reduce_sum(logs) * logdet_factor
+        if reverse:
+            dlogdet *= -1
+        return x, logdet + dlogdet
+    return x

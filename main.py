@@ -83,8 +83,7 @@ def model_fn(features, labels, mode, params):
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)    
     real_images = features['real_images']
-    
-    #with ops.arg_scope([ops.get_variable_ddi, ops.actnorm], init=True):
+        
     f_loss, _ = model.f_loss(real_images, y, is_training)
 
     if mode == tf.estimator.ModeKeys.TRAIN:
@@ -197,7 +196,7 @@ def main(cfg):
             metrics = est.evaluate(input_fn=dataset.InputFunction(False), steps=cfg.num_eval_images // cfg.batch_size)
             tf.logging.info('Finished evaluating')
             tf.logging.info(metrics)
-            ALRS.apply(metrics)
+            ALRS.apply(metrics) 
 
             generated_iter = local_est.predict(input_fn=y_input_fn)
             images = []
@@ -228,11 +227,11 @@ if __name__ == "__main__":
                         help="Minibatch size")
     parser.add_argument("--optimizer", type=str,
                         default="adam", help="adam or adamax")
-    parser.add_argument("--lr", type=float, default=0.0001,
+    parser.add_argument("--lr", type=float, default=0.001,
                         help="Base learning rate")
     parser.add_argument("--warmup", type=float, default=2000.0,
                         help="Warmup steps")
-    parser.add_argument("--beta1", type=float, default=.98, help="Adam beta1")
+    parser.add_argument("--beta1", type=float, default=.5, help="Adam beta1")
     parser.add_argument("--adam_eps", type=float, default=10e-4, help="Adam eps")
     parser.add_argument("--polyak_epochs", type=float, default=1,
                         help="Nr of averaging epochs for Polyak and beta2")
@@ -240,9 +239,9 @@ if __name__ == "__main__":
                         help="Weight decay. Switched off by default.")
 
     # Model hyperparams:
-    parser.add_argument("--width", type=int, default=128,
+    parser.add_argument("--width", type=int, default=-1,
                         help="Width of hidden layers")
-    parser.add_argument("--depth", type=int, default=2,
+    parser.add_argument("--depth", type=int, default=4,
                         help="Depth of network")
     parser.add_argument("--weight_y", type=float, default=0.00,
                         help="Weight of log p(y|x) in weighted loss")
