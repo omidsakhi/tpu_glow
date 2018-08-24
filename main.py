@@ -45,24 +45,6 @@ class AdvancedLearningRateScheduler():
 
 ALRS = AdvancedLearningRateScheduler()
 
-def polyak(params, beta):
-    #params = tf.trainable_variables()
-    ema = tf.train.ExponentialMovingAverage(decay=beta, zero_debias=True)
-    avg_op = tf.group(ema.apply(params))
-    # Swapping op
-    updates = []
-    for i in range(len(params)):
-        p = params[i]
-        avg = ema.average(p)
-        tmp = 0. + avg * 1.
-        with tf.control_dependencies([tmp]):
-            update1 = avg.assign(p)
-            with tf.control_dependencies([update1]):
-                update2 = p.assign(tmp)
-                updates += [update1, update2]
-    swap_op = tf.group(*updates)
-    return avg_op, swap_op, ema
-
 def model_fn(features, labels, mode, params):
     
     del labels
@@ -74,23 +56,24 @@ def model_fn(features, labels, mode, params):
     if mode == tf.estimator.ModeKeys.PREDICT:
         ########### 
         # PREDICT #
-        ###########    
-        generated_images = model.sample(y, is_training=False)        
+        ###########        
         predictions = {
-            'generated_images': generated_images
+            'generated_images': model.sample(y, is_training=False)        
         }
         return tpu_estimator.TPUEstimatorSpec(mode=mode, predictions=predictions)
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)    
     real_images = features['real_images']
         
-    f_loss, _ = model.f_loss(real_images, y, is_training)
+    f_loss, _ = model.f_loss(real_images, y, is_training)    
 
     if mode == tf.estimator.ModeKeys.TRAIN:
         #########
         # TRAIN #
         #########
         
+        f_loss = tf.reduce_mean(f_loss)
+
         global_step = tf.train.get_global_step()
         base_lr = cfg.lr * tf.minimum(1., 1.0 / cfg.warmup * tf.cast(global_step, tf.float32))
         ALRS.setBaseLearningRate(base_lr)
@@ -132,19 +115,22 @@ def model_fn(features, labels, mode, params):
     raise ValueError('Invalid mode provided to model_fn')
 
 
-def y_input_fn(params):
-  cfg = params['cfg']
+def y_input_fn(params):  
+  batch_size = params['batch_size']
   np.random.seed(0)
-  y = tf.data.Dataset.from_tensors(tf.constant(np.zeros((cfg.batch_size, 1, 1)), dtype=tf.int32))
+  y = tf.constant(np.zeros((batch_size, 1, 1)), dtype=tf.int32)
+  y = tf.data.Dataset.from_tensor_slices(y)
+  y = y.batch(batch_size)
   y = y.make_one_shot_iterator().get_next()
   return {'y': y}, None
 
 def write_images(images, filename):
     sq = math.floor(math.sqrt(len(images)))
-    assert sq ** 2 == len(images)    
+    assert sq ** 2 == len(images)
+    sq = int(sq) 
     image_rows = [np.concatenate(images[i:i+sq], axis=0)
                   for i in range(0, len(images), sq)]
-    tiled_image = np.concatenate(image_rows, axis=1)    
+    tiled_image = np.concatenate(image_rows, axis=1)
     img = Image.fromarray(tiled_image, mode='RGB')
     file_obj = tf.gfile.Open(filename, 'w')
     img.save(file_obj, format='png')    
@@ -169,16 +155,15 @@ def main(cfg):
         model_fn=model_fn,
         use_tpu=cfg.use_tpu,
         config=config,
-        params={"cfg": cfg},
+        params={"cfg": cfg, "data_dir": cfg.data_dir},
         train_batch_size=cfg.batch_size,
-        eval_batch_size=cfg.batch_size,
-        predict_batch_size=cfg.batch_size)
+        eval_batch_size=cfg.batch_size)
 
     local_est = tpu_estimator.TPUEstimator(
         model_fn=model_fn,
         use_tpu=False,
         config=config,
-        params={"cfg": cfg},
+        params={"cfg": cfg, "data_dir": cfg.data_dir},        
         predict_batch_size=cfg.num_eval_images)
 
     if cfg.mode == 'train':
@@ -199,13 +184,11 @@ def main(cfg):
             ALRS.apply(metrics) 
 
             generated_iter = local_est.predict(input_fn=y_input_fn)
-            images = []
-            for _ in range(cfg.num_eval_images):
-                images.append(next(generated_iter)['generated_images'][:,:,:])
-            #images = [p['generated_images'][:, :, :] for p in generated_iter]
+            images = []            
+            images = [p['generated_images'][:, :, :] for p in generated_iter]
             filename = os.path.join(cfg.model_dir, 'generated_images', 'gen_%s.png' % (str(current_step).zfill(5)))
             write_images(images, filename)
-            tf.logging.info('Finished generating images')            
+            tf.logging.info('Finished generating images')
 
 if __name__ == "__main__":
 
@@ -215,29 +198,23 @@ if __name__ == "__main__":
     # Optimization hyperparams:
     parser.add_argument("--mode", type=str, default='train',
                         help="Mode is either train or eval")
-    parser.add_argument("--train_steps", type=int, default=500000, 
+    parser.add_argument("--train_steps", type=int, default=5000000, 
                         help="Train epoch size")
-    parser.add_argument("--train_steps_per_eval", type=int, default=5000 if USE_TPU else 200, 
+    parser.add_argument("--train_steps_per_eval", type=int, default=5000 if USE_TPU else 200,
                         help="Steps per eval and image generation")
-    parser.add_argument("--iterations_per_loop", type=int, default=100 if USE_TPU else 50, 
+    parser.add_argument("--iterations_per_loop", type=int, default=500 if USE_TPU else 100, 
                         help="Steps per interior TPU loop")
     parser.add_argument("--num_eval_images", type=int, default=100, 
                         help="Number of images for evaluation")
     parser.add_argument("--batch_size", type=int, default=64, 
                         help="Minibatch size")
-    parser.add_argument("--optimizer", type=str,
-                        default="adam", help="adam or adamax")
-    parser.add_argument("--lr", type=float, default=0.0005,
+    parser.add_argument("--lr", type=float, default=0.001,
                         help="Base learning rate")
     parser.add_argument("--warmup", type=float, default=2000.0,
                         help="Warmup steps")
     parser.add_argument("--beta1", type=float, default=.9, help="Adam beta1")
     parser.add_argument("--adam_eps", type=float, default=10e-5, help="Adam eps")
-    parser.add_argument("--polyak_epochs", type=float, default=1,
-                        help="Nr of averaging epochs for Polyak and beta2")
-    parser.add_argument("--weight_decay", type=float, default=1.,
-                        help="Weight decay. Switched off by default.")
-
+    
     # Model hyperparams:
     parser.add_argument("--width", type=int, default=-1,
                         help="Width of hidden layers")
@@ -256,8 +233,7 @@ if __name__ == "__main__":
     parser.add_argument("--learntop", action="store_true",
                         help="Learn spatial prior")
     parser.add_argument("--ycond", action="store_true",
-                        help="Use y conditioning")
-    parser.add_argument("--seed", type=int, default=0, help="Random seed")
+                        help="Use y conditioning")    
     parser.add_argument("--flow_permutation", type=int, default=0,
                         help="Type of flow. 0=reverse (realnvp), 1=shuffle, 2=invconv (ours)")
     parser.add_argument("--flow_coupling", type=int, default=0,

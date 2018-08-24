@@ -25,10 +25,9 @@ class InputFunction(object):
   def __init__(self, is_training):
     self.is_training = is_training    
 
-  def __call__(self, params):
-    cfg = params['cfg']      
-    batch_size = cfg.batch_size
-    data_dir = cfg.data_dir
+  def __call__(self, params):    
+    batch_size = params['batch_size']    
+    data_dir = params['data_dir']
     file_pattern = os.path.join(data_dir, 'data_*')
     dataset = tf.data.Dataset.list_files(file_pattern, shuffle=True)    
     dataset = dataset.shuffle(buffer_size=200)

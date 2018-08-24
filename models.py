@@ -374,7 +374,7 @@ class model(object):
         local_loss = bits_x + self.cfg.weight_y * bits_y
         stats = [local_loss, bits_x, bits_y, pred_loss]
         global_stats = tf.reduce_mean(tf.stack([tf.reduce_mean(i) for i in stats]))
-        return tf.reduce_mean(local_loss), global_stats
+        return local_loss, global_stats
 
     # === Sampling function
     def sample(self, y, is_training):
