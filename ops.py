@@ -259,7 +259,7 @@ def scale(name, x, scale=1., logdet=None, logscale_factor=3., reverse=False):
         _shape = (1, 1, 1, int_shape(x)[3])
         logdet_factor = int(shape[1])*int(shape[2])    
     s = tf.get_variable(name, _shape, initializer=tf.ones_initializer())
-    logs = tf.log(tf.abs(s))
+    logs = tf.log(tf.abs(s) + 1e-6)
     if not reverse:
         x *= s
     else:

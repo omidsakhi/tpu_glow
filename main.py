@@ -227,12 +227,12 @@ if __name__ == "__main__":
                         help="Minibatch size")
     parser.add_argument("--optimizer", type=str,
                         default="adam", help="adam or adamax")
-    parser.add_argument("--lr", type=float, default=0.001,
+    parser.add_argument("--lr", type=float, default=0.0005,
                         help="Base learning rate")
     parser.add_argument("--warmup", type=float, default=2000.0,
                         help="Warmup steps")
-    parser.add_argument("--beta1", type=float, default=.5, help="Adam beta1")
-    parser.add_argument("--adam_eps", type=float, default=10e-4, help="Adam eps")
+    parser.add_argument("--beta1", type=float, default=.9, help="Adam beta1")
+    parser.add_argument("--adam_eps", type=float, default=10e-5, help="Adam eps")
     parser.add_argument("--polyak_epochs", type=float, default=1,
                         help="Nr of averaging epochs for Polyak and beta2")
     parser.add_argument("--weight_decay", type=float, default=1.,
@@ -241,7 +241,7 @@ if __name__ == "__main__":
     # Model hyperparams:
     parser.add_argument("--width", type=int, default=-1,
                         help="Width of hidden layers")
-    parser.add_argument("--depth", type=int, default=4,
+    parser.add_argument("--depth", type=int, default=8,
                         help="Depth of network")
     parser.add_argument("--weight_y", type=float, default=0.00,
                         help="Weight of log p(y|x) in weighted loss")
