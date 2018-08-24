@@ -46,7 +46,7 @@ def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
 
         if not reverse:
 
-            z, logdet = ops.actnorm_("actnorm", z, logdet=logdet, is_training=is_training)
+            #z, logdet = ops.actnorm_("actnorm", z, logdet=logdet, is_training=is_training)
 
             if cfg.flow_permutation == 0:
                 z = ops.reverse_features("reverse", z)
@@ -105,7 +105,7 @@ def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
             else:
                 raise Exception()
 
-            z, logdet = ops.actnorm_("actnorm", z, logdet=logdet, reverse=True, is_training=is_training)
+            #z, logdet = ops.actnorm_("actnorm", z, logdet=logdet, reverse=True, is_training=is_training)
 
     return z, logdet
 

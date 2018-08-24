@@ -45,6 +45,24 @@ class AdvancedLearningRateScheduler():
 
 ALRS = AdvancedLearningRateScheduler()
 
+def polyak(params, beta):
+    #params = tf.trainable_variables()
+    ema = tf.train.ExponentialMovingAverage(decay=beta, zero_debias=True)
+    avg_op = tf.group(ema.apply(params))
+    # Swapping op
+    updates = []
+    for i in range(len(params)):
+        p = params[i]
+        avg = ema.average(p)
+        tmp = 0. + avg * 1.
+        with tf.control_dependencies([tmp]):
+            update1 = avg.assign(p)
+            with tf.control_dependencies([update1]):
+                update2 = p.assign(tmp)
+                updates += [update1, update2]
+    swap_op = tf.group(*updates)
+    return avg_op, swap_op, ema
+
 def model_fn(features, labels, mode, params):
     
     del labels
@@ -90,8 +108,8 @@ def model_fn(features, labels, mode, params):
             optimizer = tpu_optimizer.CrossShardOptimizer(optimizer)            
 
         with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-            step = optimizer.minimize(f_loss, var_list=tf.trainable_variables())
-
+            step = optimizer.minimize(f_loss, var_list=tf.trainable_variables())            
+            
             increment_step = tf.assign_add(tf.train.get_or_create_global_step(), 1)
             joint_op = tf.group([step, increment_step])
 
