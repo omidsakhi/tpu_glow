@@ -65,7 +65,7 @@ def model_fn(features, labels, mode, params):
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)    
     real_images = features['real_images']
         
-    f_loss, _ = model.f_loss(real_images, y, is_training)    
+    f_loss = model.f_loss(real_images, y, is_training)    
 
     if mode == tf.estimator.ModeKeys.TRAIN:
         #########
@@ -218,7 +218,7 @@ if __name__ == "__main__":
     # Model hyperparams:
     parser.add_argument("--width", type=int, default=-1,
                         help="Width of hidden layers")
-    parser.add_argument("--depth", type=int, default=16,
+    parser.add_argument("--depth", type=int, default=4,
                         help="Depth of network")
     parser.add_argument("--weight_y", type=float, default=0.00,
                         help="Weight of log p(y|x) in weighted loss")

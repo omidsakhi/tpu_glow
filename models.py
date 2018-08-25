@@ -7,44 +7,43 @@ def codec(cfg):
 
     def encoder(z, objective, is_training):        
         eps = []
+        shape = ops.int_shape(z)
+        n_z = shape[3]
+        assert n_z % 2 == 0
+        z1 = z[:, :, :, :n_z // 2]
+        z2 = z[:, :, :, n_z // 2:]
         for i in range(cfg.n_levels):
-            z, objective = revnet2d(str(i), z, objective, cfg, is_training=is_training)            
+            z1, z2, objective = revnet2d(str(i), z1, z2, objective, cfg, is_training=is_training)            
             if i < cfg.n_levels-1:
-                z, objective, _eps = split2d("pool"+str(i), z, objective=objective)                
+                z1, z2, objective, _eps = split2d("pool"+str(i), z1, z2, objective=objective)                
                 eps.append(_eps)            
-        z = tf.identity(z, name = 'z')
+        z = tf.concat([z1, z2], 3)
         return z, objective, eps
 
     def decoder(z, is_training, eps=[None]*cfg.n_levels, eps_std=None):        
+        shape = ops.int_shape(z)
+        n_z = shape[3]
+        assert n_z % 2 == 0
+        z1 = z[:, :, :, :n_z // 2]
+        z2 = z[:, :, :, n_z // 2:]
         for i in reversed(range(cfg.n_levels)):
-            if i < cfg.n_levels-1:
-                z = split2d_reverse("pool"+str(i), z, eps=eps[i], eps_std=eps_std)
-            z, _ = revnet2d(str(i), z, 0, cfg, is_training=is_training, reverse=True)            
+            if i < cfg.n_levels-1:                
+                z1, z2 = split2d_reverse("pool"+str(i), z1, z2, eps=eps[i], eps_std=eps_std)
+            z1, z2, _ = revnet2d(str(i), z1, z2, 0, cfg, is_training=is_training, reverse=True)            
+        z = tf.concat([z1, z2], 3) 
         return z
 
     return encoder, decoder
 
-def revnet2d(name, z, logdet, cfg, is_training, reverse=False):
+def revnet2d(name, z1, z2, logdet, cfg, is_training, reverse=False):
     with tf.variable_scope(name):
-        shape = ops.int_shape(z)
-        n_z = shape[3]
-        assert n_z % 2 == 0
         if not reverse:
-            z1 = z[:, :, :, :n_z // 2]
-            z2 = z[:, :, :, n_z // 2:]
             for i in range(cfg.depth):
-                z1, z2, logdet = revnet2d_step(str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)
-            z = tf.concat([z1, z2], 3)            
+                z1, z2, logdet = revnet2d_step(str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)                       
         else:
-            z1 = z[:, :, :, :n_z // 2]
-            z2 = z[:, :, :, n_z // 2:]
-            shape = ops.int_shape(z)
-            n_z = shape[3]
-            assert n_z % 2 == 0
-            for i in reversed(range(cfg.depth)):
+           for i in reversed(range(cfg.depth)):
                 z1, z2, logdet = revnet2d_step(str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)
-            z = tf.concat([z1, z2], 3)
-    return z, logdet
+    return z1, z2, logdet
 
 # Simpler, new version
 def revnet2d_step(name, z1, z2, flip, logdet, cfg, reverse, is_training):
@@ -74,26 +73,28 @@ def f_(name, h, cfg, n_out=None, is_training = False):
         width = hw_map[n_hw]
     n_out = n_out or int(h.get_shape()[3])
     with tf.variable_scope(name):
-        h = ops._conv2d("l_1", h, width, 3, 1, is_training, relu=True)        
-        #h = ops._conv2d("l_2", h, width, 1, 1, is_training, relu=True)
-        h = ops._conv2d("l_3", h, n_out, 3, 1, is_training, relu=False, init_zero=True)        
+        h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training, relu=True)        
+        h = ops._conv2d("l_2", h, width, [3, 1], 1, is_training, relu=True)        
+        h = ops._conv2d("l_3", h, width, [1, 3], 1, is_training, relu=True)
+        h = ops._conv2d("l_4", h, n_out, [1, 1], 1, is_training, relu=False, init_zero=True)        
     return h
 
-def split2d(name, z, objective=0.):
+def split2d(name, z1, z2, objective=0.):
     with tf.variable_scope(name):
-        n_z = ops.int_shape(z)[3]
-        z1 = z[:, :, :, :n_z // 2]
-        z2 = z[:, :, :, n_z // 2:]
         pz = split2d_prior(z1)
         objective += pz.logp(z2)
-        z1 = ops.squeeze2d(z1)
         eps = pz.get_eps(z2)
-        return z1, objective, eps
+        z1 = ops.squeeze2d(z1)
+        n_z1 = ops.int_shape(z1)[3]
+        z11 = z1[:, :, :, :n_z1 // 2]
+        z12 = z1[:, :, :, n_z1 // 2:]
+        return z11, z12, objective, eps
 
 
-def split2d_reverse(name, z, eps, eps_std):
+def split2d_reverse(name, z1, z2, eps, eps_std):
     with tf.variable_scope(name):
-        z1 = ops.unsqueeze2d(z)
+        z1 = tf.concat([z1, z2], 3)
+        z1 = ops.unsqueeze2d(z1)
         pz = split2d_prior(z1)
         if eps is not None:
             # Already sampled eps
@@ -103,9 +104,8 @@ def split2d_reverse(name, z, eps, eps_std):
             z2 = pz.sample2(pz.eps * tf.reshape(eps_std, [-1, 1, 1, 1]))
         else:
             # Sample normally
-            z2 = pz.sample
-        z = tf.concat([z1, z2], 3)
-        return z
+            z2 = pz.sample        
+        return z1, z2
 
 def split2d_prior(z):
     n_z2 = int(z.get_shape()[3])
@@ -318,9 +318,7 @@ class model(object):
     def f_loss(self,x, y, is_training):
         bits_x, bits_y, pred_loss = self._f_loss(x, y, is_training)
         local_loss = bits_x + self.cfg.weight_y * bits_y
-        stats = [local_loss, bits_x, bits_y, pred_loss]
-        global_stats = tf.reduce_mean(tf.stack([tf.reduce_mean(i) for i in stats]))
-        return local_loss, global_stats
+        return local_loss
 
     # === Sampling function
     def sample(self, y, is_training):

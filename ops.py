@@ -30,7 +30,7 @@ def dense_with_bias(inputs, channels, name):
 def _conv2d(name, inputs, filters, kernel_size, stride, is_training, init_zero=False, relu=False):
     with tf.variable_scope(name):
         inputs = tf.layers.conv2d(
-        inputs, filters, [kernel_size, kernel_size],
+        inputs, filters, kernel_size,
         strides=[stride, stride], padding='same',
         bias_initializer=tf.zeros_initializer(),
         use_bias=True,
