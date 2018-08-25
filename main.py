@@ -218,7 +218,7 @@ if __name__ == "__main__":
     # Model hyperparams:
     parser.add_argument("--width", type=int, default=-1,
                         help="Width of hidden layers")
-    parser.add_argument("--depth", type=int, default=8,
+    parser.add_argument("--depth", type=int, default=16,
                         help="Depth of network")
     parser.add_argument("--weight_y", type=float, default=0.00,
                         help="Weight of log p(y|x) in weighted loss")

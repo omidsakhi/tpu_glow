@@ -26,88 +26,44 @@ def codec(cfg):
 
 def revnet2d(name, z, logdet, cfg, is_training, reverse=False):
     with tf.variable_scope(name):
-        if not reverse:
-            for i in range(cfg.depth):
-                z, logdet = checkpoint(z, logdet)
-                z, logdet = revnet2d_step(str(i), z, logdet, cfg, reverse, is_training)
-            z, logdet = checkpoint(z, logdet)
-        else:
-            for i in reversed(range(cfg.depth)):
-                z, logdet = revnet2d_step(str(i), z, logdet, cfg, reverse, is_training)
-    return z, logdet
-
-# Simpler, new version
-def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
-    with tf.variable_scope(name):
-
         shape = ops.int_shape(z)
         n_z = shape[3]
         assert n_z % 2 == 0
-
         if not reverse:
-
-            z, logdet = ops.scale_bias("actnorm", z, logdet=logdet)
-
-            if cfg.flow_permutation == 0:
-                z = ops.reverse_features("reverse", z)
-            elif cfg.flow_permutation == 1:
-                z = ops.shuffle_features("shuffle", z)
-            elif cfg.flow_permutation == 2:
-                z, logdet = invertible_1x1_conv("invconv", z, logdet)
-            else:
-                raise Exception()
-
             z1 = z[:, :, :, :n_z // 2]
             z2 = z[:, :, :, n_z // 2:]
-
-            if cfg.flow_coupling == 0:
-                z2 += f_("f1", z1, cfg, is_training=is_training)
-            elif cfg.flow_coupling == 1:
-                h = f_("f1", z1, cfg, n_z, is_training=is_training)
-                shift = h[:, :, :, 0::2]
-                # scale = tf.exp(h[:, :, :, 1::2])
-                scale = tf.nn.sigmoid(h[:, :, :, 1::2] + 2.)
-                z2 += shift
-                z2 *= scale
-                logdet += tf.reduce_sum(tf.log(scale), axis=[1, 2, 3])
-            else:
-                raise Exception()
-
-            z = tf.concat([z1, z2], 3)
-
+            for i in range(cfg.depth):
+                z1, z2, logdet = revnet2d_step(str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)
+            z = tf.concat([z1, z2], 3)            
         else:
-
             z1 = z[:, :, :, :n_z // 2]
             z2 = z[:, :, :, n_z // 2:]
-
-            if cfg.flow_coupling == 0:
-                z2 -= f_("f1", z1, cfg, is_training=is_training)
-            elif cfg.flow_coupling == 1:
-                h = f_("f1", z1, cfg, n_z, is_training=is_training)
-                shift = h[:, :, :, 0::2]
-                # scale = tf.exp(h[:, :, :, 1::2])
-                scale = tf.nn.sigmoid(h[:, :, :, 1::2] + 2.)
-                z2 /= scale
-                z2 -= shift
-                logdet -= tf.reduce_sum(tf.log(scale), axis=[1, 2, 3])
-            else:
-                raise Exception()
-
+            shape = ops.int_shape(z)
+            n_z = shape[3]
+            assert n_z % 2 == 0
+            for i in reversed(range(cfg.depth)):
+                z1, z2, logdet = revnet2d_step(str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)
             z = tf.concat([z1, z2], 3)
-
-            if cfg.flow_permutation == 0:
-                z = ops.reverse_features("reverse", z, reverse=True)
-            elif cfg.flow_permutation == 1:
-                z = ops.shuffle_features("shuffle", z, reverse=True)
-            elif cfg.flow_permutation == 2:
-                z, logdet = invertible_1x1_conv(
-                    "invconv", z, logdet, reverse=True)
-            else:
-                raise Exception()
-
-            z, logdet = ops.scale_bias("actnorm", z, logdet=logdet, reverse=True)
-
     return z, logdet
+
+# Simpler, new version
+def revnet2d_step(name, z1, z2, flip, logdet, cfg, reverse, is_training):
+    with tf.variable_scope(name):
+        if not reverse:
+            if flip:
+                z2, logdet = ops.scale_bias("actnorm", z2, logdet=logdet)
+                z2 = z2 + f_("f1", z1, cfg, is_training=is_training)
+            else:
+                z1, logdet = ops.scale_bias("actnorm", z1, logdet=logdet)
+                z1 = z1 + f_("f1", z2, cfg, is_training=is_training)
+        else:   
+            if flip:         
+                z2 = z2 - f_("f1", z1, cfg, is_training=is_training)
+                z2, logdet = ops.scale_bias("actnorm", z2, logdet=logdet, reverse=True)
+            else:
+                z1 = z1 - f_("f1", z2, cfg, is_training=is_training)
+                z1, logdet = ops.scale_bias("actnorm", z1, logdet=logdet, reverse=True)
+    return z1, z2, logdet
 
 def f_(name, h, cfg, n_out=None, is_training = False):
     width = cfg.width
@@ -159,16 +115,6 @@ def split2d_prior(z):
     mean = h[:, :, :, 0::2]
     logs = h[:, :, :, 1::2]
     return ops.gaussian_diag(mean, logs)
-
-def checkpoint(z, logdet):
-    zshape = ops.int_shape(z)
-    z = tf.reshape(z, [-1, zshape[1]*zshape[2]*zshape[3]])
-    logdet = tf.reshape(logdet, [-1, 1])
-    combined = tf.concat([z, logdet], axis=1)
-    tf.add_to_collection('checkpoints', combined)
-    logdet = combined[:, -1]
-    z = tf.reshape(combined[:, :-1], [-1, zshape[1], zshape[2], zshape[3]])
-    return z, logdet
 
 # Invertible 1x1 conv
 def invertible_1x1_conv(name, z, logdet, reverse=False):
