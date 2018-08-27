@@ -7,7 +7,7 @@ from tensorflow.contrib.tpu.python.tpu import tpu_estimator  # pylint: disable=E
 from tensorflow.contrib.tpu.python.tpu import tpu_optimizer  # pylint: disable=E0611
 from tensorflow.python.estimator import estimator  # pylint: disable=E0611
 import math
-import ops 
+import ops
 import memory_saving_gradients
 import celeba
 global dataset
@@ -17,8 +17,9 @@ USE_TPU = False
 
 import models
 
+
 def model_fn(features, labels, mode, params):
-    
+
     del labels
 
     cfg = params['cfg']
@@ -26,34 +27,35 @@ def model_fn(features, labels, mode, params):
     y = features['y']
 
     if mode == tf.estimator.ModeKeys.PREDICT:
-        ########### 
+        ###########
         # PREDICT #
-        ###########        
+        ###########
         predictions = {
-            'generated_images': model.sample(y, is_training=False, top_shape=[16,16,48])        
+            'generated_images': model.sample(y, is_training=False, top_shape=[16, 16, 48])
         }
         return tpu_estimator.TPUEstimatorSpec(mode=mode, predictions=predictions)
 
-    is_training = (mode == tf.estimator.ModeKeys.TRAIN)    
+    is_training = (mode == tf.estimator.ModeKeys.TRAIN)
     real_images = features['real_images']
-        
-    f_loss = model.f_loss(real_images, y, is_training)    
+
+    f_loss = model.f_loss(real_images, y, is_training)
 
     if mode == tf.estimator.ModeKeys.TRAIN:
         #########
         # TRAIN #
         #########
-        
+
         f_loss = tf.reduce_mean(f_loss)
 
         if not cfg.use_tpu:
-            for v in tf.trainable_variables(): 
-                tf.summary.histogram(v.name.replace(':','_'),v)
+            for v in tf.trainable_variables():
+                tf.summary.histogram(v.name.replace(':', '_'), v)
 
-        optimizer = tf.train.AdamOptimizer(learning_rate=cfg.lr, beta1=cfg.beta1, epsilon=cfg.adam_eps)
+        optimizer = tf.train.AdamOptimizer(
+            learning_rate=cfg.lr, beta1=cfg.beta1, epsilon=cfg.adam_eps)
 
         if cfg.use_tpu:
-            optimizer = tpu_optimizer.CrossShardOptimizer(optimizer)            
+            optimizer = tpu_optimizer.CrossShardOptimizer(optimizer)
 
         with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
             if cfg.memory_saving_gradients:
@@ -61,9 +63,11 @@ def model_fn(features, labels, mode, params):
                 gs = gradients(f_loss, tf.trainable_variables())
                 grads_and_vars = list(zip(gs, tf.trainable_variables()))
                 train_op = optimizer.apply_gradients(grads_and_vars)
-            else
-                train_op = optimizer.minimize(f_loss, var_list=tf.trainable_variables())            
-            increment_step = tf.assign_add(tf.train.get_or_create_global_step(), 1)
+            else:
+                train_op = optimizer.minimize(
+                    f_loss, var_list=tf.trainable_variables())
+            increment_step = tf.assign_add(
+                tf.train.get_or_create_global_step(), 1)
             joint_op = tf.group([train_op, increment_step])
 
             return tpu_estimator.TPUEstimatorSpec(
@@ -76,8 +80,8 @@ def model_fn(features, labels, mode, params):
         # EVAL #
         ########
         def _eval_metric_fn(f_loss):
-            return {                
-                'f_loss': tf.metrics.mean(f_loss)}        
+            return {
+                'f_loss': tf.metrics.mean(f_loss)}
         return tpu_estimator.TPUEstimatorSpec(
             mode=mode,
             loss=tf.reduce_mean(f_loss),
@@ -86,29 +90,31 @@ def model_fn(features, labels, mode, params):
     raise ValueError('Invalid mode provided to model_fn')
 
 
-def y_input_fn(params):  
-  batch_size = params['batch_size']
-  np.random.seed(0)
-  y = tf.constant(np.zeros((batch_size, 1, 1)), dtype=tf.int32)
-  y = tf.data.Dataset.from_tensor_slices(y)
-  y = y.batch(batch_size)
-  y = y.make_one_shot_iterator().get_next()
-  return {'y': y}, None
+def y_input_fn(params):
+    batch_size = params['batch_size']
+    np.random.seed(0)
+    y = tf.constant(np.zeros((batch_size, 1, 1)), dtype=tf.int32)
+    y = tf.data.Dataset.from_tensor_slices(y)
+    y = y.batch(batch_size)
+    y = y.make_one_shot_iterator().get_next()
+    return {'y': y}, None
+
 
 def write_images(images, filename):
     sq = math.floor(math.sqrt(len(images)))
     assert sq ** 2 == len(images)
-    sq = int(sq) 
+    sq = int(sq)
     image_rows = [np.concatenate(images[i:i+sq], axis=0)
                   for i in range(0, len(images), sq)]
     tiled_image = np.concatenate(image_rows, axis=1)
     img = Image.fromarray(tiled_image, mode='RGB')
     file_obj = tf.gfile.Open(filename, 'w')
-    img.save(file_obj, format='png')    
-    
+    img.save(file_obj, format='png')
+
+
 def main(cfg):
     tpu_cluster_resolver = None
-    
+
     if cfg.use_tpu:
         tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
             cfg.tpu,
@@ -134,31 +140,37 @@ def main(cfg):
         model_fn=model_fn,
         use_tpu=False,
         config=config,
-        params={"cfg": cfg, "data_dir": cfg.data_dir},        
+        params={"cfg": cfg, "data_dir": cfg.data_dir},
         predict_batch_size=cfg.num_eval_images)
 
     if cfg.mode == 'train':
         tf.gfile.MakeDirs(os.path.join(cfg.model_dir))
         tf.gfile.MakeDirs(os.path.join(cfg.model_dir, 'generated_images'))
 
-        current_step = estimator._load_global_step_from_checkpoint_dir(cfg.model_dir)   # pylint: disable=protected-access,line-too-long
-        tf.logging.info('Starting training for %d steps, current step: %d' % (cfg.train_steps, current_step))
+        current_step = estimator._load_global_step_from_checkpoint_dir(
+            cfg.model_dir)   # pylint: disable=protected-access,line-too-long
+        tf.logging.info('Starting training for %d steps, current step: %d' % (
+            cfg.train_steps, current_step))
         while current_step < cfg.train_steps:
-            next_checkpoint = min(current_step + cfg.train_steps_per_eval, cfg.train_steps)
-            est.train(input_fn=dataset.InputFunction(True), max_steps=next_checkpoint)
+            next_checkpoint = min(
+                current_step + cfg.train_steps_per_eval, cfg.train_steps)
+            est.train(input_fn=dataset.InputFunction(
+                True), max_steps=next_checkpoint)
             current_step = next_checkpoint
             tf.logging.info('Finished training step %d' % current_step)
 
             #metrics = est.evaluate(input_fn=dataset.InputFunction(False), steps=cfg.num_eval_images // cfg.batch_size)
             #tf.logging.info('Finished evaluating')
-            #tf.logging.info(metrics)
+            # tf.logging.info(metrics)
 
             generated_iter = local_est.predict(input_fn=y_input_fn)
-            images = []            
+            images = []
             images = [p['generated_images'][:, :, :] for p in generated_iter]
-            filename = os.path.join(cfg.model_dir, 'generated_images', 'gen_%s.png' % (str(current_step).zfill(5)))
+            filename = os.path.join(
+                cfg.model_dir, 'generated_images', 'gen_%s.png' % (str(current_step).zfill(5)))
             write_images(images, filename)
             tf.logging.info('Finished generating images')
+
 
 if __name__ == "__main__":
 
@@ -168,25 +180,26 @@ if __name__ == "__main__":
     # Optimization hyperparams:
     parser.add_argument("--mode", type=str, default='train',
                         help="Mode is either train or eval")
-    parser.add_argument("--train_steps", type=int, default=5000000, 
+    parser.add_argument("--train_steps", type=int, default=5000000,
                         help="Train epoch size")
     parser.add_argument("--train_steps_per_eval", type=int, default=5000 if USE_TPU else 200,
                         help="Steps per eval and image generation")
-    parser.add_argument("--iterations_per_loop", type=int, default=500 if USE_TPU else 100, 
+    parser.add_argument("--iterations_per_loop", type=int, default=500 if USE_TPU else 100,
                         help="Steps per interior TPU loop")
-    parser.add_argument("--num_eval_images", type=int, default=100, 
+    parser.add_argument("--num_eval_images", type=int, default=100,
                         help="Number of images for evaluation")
-    parser.add_argument("--batch_size", type=int, default=64, 
+    parser.add_argument("--batch_size", type=int, default=64,
                         help="Minibatch size")
-    parser.add_argument("--lr", type=float, default=0.0005,
+    parser.add_argument("--lr", type=float, default=0.001,
                         help="Base learning rate")
     parser.add_argument("--warmup", type=float, default=2000.0,
                         help="Warmup steps")
-    parser.add_argument("--beta1", type=float, default=.5, help="Adam beta1")
-    parser.add_argument("--adam_eps", type=float, default=10e-5, help="Adam eps")
+    parser.add_argument("--beta1", type=float, default=.9, help="Adam beta1")
+    parser.add_argument("--adam_eps", type=float,
+                        default=10e-5, help="Adam eps")
     parser.add_argument("--memory_saving_gradients", type=bool, default=True,
                         help="Use memory saving gradients")
-    
+
     # Model hyperparams:
     parser.add_argument("--n_levels", type=int, default=3,
                         help="Number of levels")
@@ -205,7 +218,7 @@ if __name__ == "__main__":
     parser.add_argument("--learntop", action="store_true",
                         help="Learn spatial prior")
     parser.add_argument("--ycond", action="store_true",
-                        help="Use y conditioning")    
+                        help="Use y conditioning")
 
     # Cloud TPU Cluster Resolvers
     parser.add_argument("--use_tpu", type=bool, default=True if USE_TPU else False,
@@ -227,6 +240,5 @@ if __name__ == "__main__":
 
     cfg = parser.parse_args()
 
-    tf.logging.set_verbosity(tf.logging.INFO)  
+    tf.logging.set_verbosity(tf.logging.INFO)
     main(cfg)
-
