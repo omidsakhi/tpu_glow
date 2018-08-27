@@ -8,7 +8,7 @@ from tensorflow.contrib.tpu.python.tpu import tpu_optimizer  # pylint: disable=E
 from tensorflow.python.estimator import estimator  # pylint: disable=E0611
 import math
 import ops 
-
+import memory_saving_gradients
 import celeba
 global dataset
 dataset = celeba
@@ -16,34 +16,6 @@ dataset = celeba
 USE_TPU = False
 
 import models
-
-class AdvancedLearningRateScheduler():
-    patientce = 64    
-    best = 9999999
-    lr = 0
-    wait = 0
-    decay = 0.5
-
-    def setBaseLearningRate(self,lr):
-        self.lr = lr
-
-    def apply(self, metrics):        
-        shouldExport = False        
-        if (metrics['loss'] < self.best):
-            self.best = metrics['loss']
-            self.wait = 0
-            shouldExport = True
-        else:
-            self.wait += 1
-        if self.wait > self.patientce:
-            self.lr *= self.decay
-            self.wait = 0
-        return shouldExport
-    
-    def learning_rate(self):
-        return self.lr
-
-ALRS = AdvancedLearningRateScheduler()
 
 def model_fn(features, labels, mode, params):
     
@@ -58,7 +30,7 @@ def model_fn(features, labels, mode, params):
         # PREDICT #
         ###########        
         predictions = {
-            'generated_images': model.sample(y, is_training=False)        
+            'generated_images': model.sample(y, is_training=False, top_shape=[16,16,48])        
         }
         return tpu_estimator.TPUEstimatorSpec(mode=mode, predictions=predictions)
 
@@ -74,26 +46,25 @@ def model_fn(features, labels, mode, params):
         
         f_loss = tf.reduce_mean(f_loss)
 
-        global_step = tf.train.get_global_step()
-        base_lr = cfg.lr * tf.minimum(1., 1.0 / cfg.warmup * tf.cast(global_step, tf.float32))
-        ALRS.setBaseLearningRate(base_lr)
-        learning_rate = ALRS.learning_rate()
-
         if not cfg.use_tpu:
             for v in tf.trainable_variables(): 
                 tf.summary.histogram(v.name.replace(':','_'),v)
-            tf.summary.scalar('lr', learning_rate)
 
-        optimizer = tf.train.AdamOptimizer(learning_rate=learning_rate, beta1=cfg.beta1, epsilon=cfg.adam_eps)
+        optimizer = tf.train.AdamOptimizer(learning_rate=cfg.lr, beta1=cfg.beta1, epsilon=cfg.adam_eps)
 
         if cfg.use_tpu:
             optimizer = tpu_optimizer.CrossShardOptimizer(optimizer)            
 
         with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-            step = optimizer.minimize(f_loss, var_list=tf.trainable_variables())            
-            
+            if cfg.memory_saving_gradients:
+                from memory_saving_gradients import gradients
+                gs = gradients(f_loss, tf.trainable_variables())
+                grads_and_vars = list(zip(gs, tf.trainable_variables()))
+                train_op = optimizer.apply_gradients(grads_and_vars)
+            else
+                train_op = optimizer.minimize(f_loss, var_list=tf.trainable_variables())            
             increment_step = tf.assign_add(tf.train.get_or_create_global_step(), 1)
-            joint_op = tf.group([step, increment_step])
+            joint_op = tf.group([train_op, increment_step])
 
             return tpu_estimator.TPUEstimatorSpec(
                 mode=mode,
@@ -178,10 +149,9 @@ def main(cfg):
             current_step = next_checkpoint
             tf.logging.info('Finished training step %d' % current_step)
 
-            metrics = est.evaluate(input_fn=dataset.InputFunction(False), steps=cfg.num_eval_images // cfg.batch_size)
-            tf.logging.info('Finished evaluating')
-            tf.logging.info(metrics)
-            ALRS.apply(metrics) 
+            #metrics = est.evaluate(input_fn=dataset.InputFunction(False), steps=cfg.num_eval_images // cfg.batch_size)
+            #tf.logging.info('Finished evaluating')
+            #tf.logging.info(metrics)
 
             generated_iter = local_est.predict(input_fn=y_input_fn)
             images = []            
@@ -208,24 +178,26 @@ if __name__ == "__main__":
                         help="Number of images for evaluation")
     parser.add_argument("--batch_size", type=int, default=64, 
                         help="Minibatch size")
-    parser.add_argument("--lr", type=float, default=0.001,
+    parser.add_argument("--lr", type=float, default=0.0005,
                         help="Base learning rate")
     parser.add_argument("--warmup", type=float, default=2000.0,
                         help="Warmup steps")
-    parser.add_argument("--beta1", type=float, default=.9, help="Adam beta1")
+    parser.add_argument("--beta1", type=float, default=.5, help="Adam beta1")
     parser.add_argument("--adam_eps", type=float, default=10e-5, help="Adam eps")
+    parser.add_argument("--memory_saving_gradients", type=bool, default=True,
+                        help="Use memory saving gradients")
     
     # Model hyperparams:
+    parser.add_argument("--n_levels", type=int, default=3,
+                        help="Number of levels")
+    parser.add_argument("--depth", type=int, default=10,
+                        help="Depth of network")
     parser.add_argument("--width", type=int, default=-1,
                         help="Width of hidden layers")
-    parser.add_argument("--depth", type=int, default=4,
-                        help="Depth of network")
     parser.add_argument("--weight_y", type=float, default=0.00,
                         help="Weight of log p(y|x) in weighted loss")
     parser.add_argument("--n_bits_x", type=int, default=8,
                         help="Number of bits of x")
-    parser.add_argument("--n_levels", type=int, default=5,
-                        help="Number of levels")
     parser.add_argument("--n_y", type=int, default=1,
                         help="Number of final layer output")
 
@@ -234,10 +206,6 @@ if __name__ == "__main__":
                         help="Learn spatial prior")
     parser.add_argument("--ycond", action="store_true",
                         help="Use y conditioning")    
-    parser.add_argument("--flow_permutation", type=int, default=0,
-                        help="Type of flow. 0=reverse (realnvp), 1=shuffle, 2=invconv (ours)")
-    parser.add_argument("--flow_coupling", type=int, default=0,
-                        help="Coupling type: 0=additive, 1=affine")
 
     # Cloud TPU Cluster Resolvers
     parser.add_argument("--use_tpu", type=bool, default=True if USE_TPU else False,
@@ -252,9 +220,9 @@ if __name__ == "__main__":
                         help="GCE zone where the Cloud TPU is located in")
 
     # dataset
-    parser.add_argument("--data_dir", type=str, default='$STORAGE_BUCKET/dataset' if USE_TPU else './dataset',
+    parser.add_argument("--data_dir", type=str, default='gs://BUCKET/dataset' if USE_TPU else './dataset',
                         help="Bucket/Folder that contains the data tfrecord files")
-    parser.add_argument("--model_dir", type=str, default='$STORAGE_BUCKET/output' if USE_TPU else './output',
+    parser.add_argument("--model_dir", type=str, default='gs://BUCKET/output' if USE_TPU else './output',
                         help="Output model directory")
 
     cfg = parser.parse_args()

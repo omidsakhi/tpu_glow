@@ -10,22 +10,20 @@ def codec(cfg):
         shape = ops.int_shape(z)
         n_z = shape[3]
         assert n_z % 2 == 0
-        z1 = z[:, :, :, :n_z // 2]
-        z2 = z[:, :, :, n_z // 2:]
-        for i in range(cfg.n_levels):
-            z1, z2, objective = revnet2d(str(i), z1, z2, objective, cfg, is_training=is_training)            
+        z1 , z2 = tf.split(z, 2, axis=3)
+        for i in range(cfg.n_levels):            
+            z1, z2, objective = revnet2d(str(i), z1, z2, objective, cfg, is_training=is_training)                        
             if i < cfg.n_levels-1:
                 z1, z2, objective, _eps = split2d("pool"+str(i), z1, z2, objective=objective)                
                 eps.append(_eps)            
-        z = tf.concat([z1, z2], 3)
+        z = tf.concat([z1, z2], 3)        
         return z, objective, eps
 
     def decoder(z, is_training, eps=[None]*cfg.n_levels, eps_std=None):        
         shape = ops.int_shape(z)
         n_z = shape[3]
         assert n_z % 2 == 0
-        z1 = z[:, :, :, :n_z // 2]
-        z2 = z[:, :, :, n_z // 2:]
+        z1 , z2 = tf.split(z, 2, axis=3)
         for i in reversed(range(cfg.n_levels)):
             if i < cfg.n_levels-1:                
                 z1, z2 = split2d_reverse("pool"+str(i), z1, z2, eps=eps[i], eps_std=eps_std)
@@ -39,7 +37,11 @@ def revnet2d(name, z1, z2, logdet, cfg, is_training, reverse=False):
     with tf.variable_scope(name):
         if not reverse:
             for i in range(cfg.depth):
-                z1, z2, logdet = revnet2d_step(str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)                       
+                if cfg.memory_saving_gradients:
+                    z1, z2, logdet = checkpoint(z1, z2, logdet)
+                z1, z2, logdet = revnet2d_step(str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)     
+            if cfg.memory_saving_gradients:                
+                z1, z2, logdet = checkpoint(z1, z2, logdet)
         else:
            for i in reversed(range(cfg.depth)):
                 z1, z2, logdet = revnet2d_step(str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)
@@ -74,9 +76,8 @@ def f_(name, h, cfg, n_out=None, is_training = False):
     n_out = n_out or int(h.get_shape()[3])
     with tf.variable_scope(name):
         h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training, relu=True)        
-        h = ops._conv2d("l_2", h, width, [3, 1], 1, is_training, relu=True)        
-        h = ops._conv2d("l_3", h, width, [1, 3], 1, is_training, relu=True)
-        h = ops._conv2d("l_4", h, n_out, [1, 1], 1, is_training, relu=False, init_zero=True)        
+        h = ops._conv2d("l_2", h, width, [1, 1], 1, is_training, relu=True)        
+        h = ops._conv2d("l_3", h, n_out, [1, 1], 1, is_training, relu=False, init_zero=True)        
     return h
 
 def split2d(name, z1, z2, objective=0.):
@@ -86,8 +87,8 @@ def split2d(name, z1, z2, objective=0.):
         eps = pz.get_eps(z2)
         z1 = ops.squeeze2d(z1)
         n_z1 = ops.int_shape(z1)[3]
-        z11 = z1[:, :, :, :n_z1 // 2]
-        z12 = z1[:, :, :, n_z1 // 2:]
+        assert n_z1 % 2 == 0        
+        z11 , z12 = tf.split(z1,2, axis=3)
         return z11, z12, objective, eps
 
 
@@ -223,15 +224,24 @@ def invertible_1x1_conv(name, z, logdet, reverse=False):
 
                 return z, logdet
 
-def prior(name, y_onehot, cfg):
+def checkpoint(z1, z2, logdet):
+    zshape = ops.int_shape(z1)
+    lshape = ops.int_shape(logdet)    
+    z1 = tf.reshape(z1, [zshape[0], zshape[1]*zshape[2]*zshape[3]])
+    z2 = tf.reshape(z2, [zshape[0], zshape[1]*zshape[2]*zshape[3]])    
+    logdet = tf.reshape(logdet, [lshape[0], 1])
+    combined = tf.concat([z1, z2, logdet], axis=1)
+    tf.add_to_collection('checkpoints', combined)
+    logdet = combined[:, -1]
+    z1 = tf.reshape(combined[:, 0:zshape[1]*zshape[2]*zshape[3]], [-1, zshape[1], zshape[2], zshape[3]])
+    z2 = tf.reshape(combined[:, zshape[1]*zshape[2]*zshape[3]:-1], [-1, zshape[1], zshape[2], zshape[3]])
+    return z1, z2, logdet
 
-    with tf.variable_scope(name):
-                
-        cfg.top_shape = [4,4, 192]
+def prior(name, y_onehot, cfg, top_shape):
 
-        n_z = cfg.top_shape[-1]
-
-        h = tf.zeros([tf.shape(y_onehot)[0]]+cfg.top_shape[:2]+[2*n_z])
+    with tf.variable_scope(name):        
+        n_z = top_shape[-1]
+        h = tf.zeros([tf.shape(y_onehot)[0]]+top_shape[:2]+[2*n_z])
         if cfg.learntop:                        
             h = ops._conv2d('p', h, 2*n_z, 3, 1, True)
         if cfg.ycond:
@@ -285,9 +295,8 @@ class model(object):
             z = ops.squeeze2d(z, 2)  # > 16x16x12
             z, objective, _ = self.encoder(z, objective, is_training)                        
 
-            # Prior
-            self.cfg.top_shape = ops.int_shape(z)[1:]
-            logp, _, _ = prior("prior", y_onehot, self.cfg)            
+            # Prior            
+            logp, _, _ = prior("prior", y_onehot, self.cfg, ops.int_shape(z)[1:])            
 
             objective += logp(z)            
 
@@ -321,10 +330,10 @@ class model(object):
         return local_loss
 
     # === Sampling function
-    def sample(self, y, is_training):
+    def sample(self, y, is_training, top_shape):
         with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
             y_onehot = tf.cast(tf.one_hot(y, self.cfg.n_y, 1, 0), 'float32')
-            _, sample, _ = prior("prior", y_onehot, self.cfg)
+            _, sample, _ = prior("prior", y_onehot, self.cfg, top_shape)
             z = sample()
             x = self.decoder(z, is_training)
             x = ops.unsqueeze2d(x, 2)  # 8x8x12 -> 16x16x3    
@@ -349,7 +358,7 @@ class model(object):
 
             # Prior
             self.cfg.top_shape = ops.int_shape(z)[1:]
-            logp, _, _eps = prior("prior", y_onehot, self.cfg)
+            logp, _, _eps = prior("prior", y_onehot, self.cfg, top_shape=None) #TODO
             objective += logp(z)
             eps.append(_eps(z))
         return eps
@@ -357,7 +366,7 @@ class model(object):
     def f_decode(self, y, eps, is_training):
         with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
             y_onehot = tf.cast(tf.one_hot(y, self.cfg.n_y, 1, 0), 'float32')
-            _, sample, _ = prior("prior", y_onehot, self.cfg)
+            _, sample, _ = prior("prior", y_onehot, self.cfg, top_shape=None) #TODO
             z = sample(eps=eps[-1])
             z = self.decoder(z, is_training = is_training, eps=eps[:-1])
             z = ops.unsqueeze2d(z, 2)  # 8x8x12 -> 16x16x3     

@@ -44,6 +44,7 @@ class InputFunction(object):
     dataset = dataset.prefetch(tf.contrib.data.AUTOTUNE)
     images, labels = dataset.make_one_shot_iterator().get_next()
     images = tf.reshape(images, [batch_size, 128, 128, 3])
+    images = tf.image.random_flip_left_right(images)
     y = tf.constant(0, dtype=tf.int32, shape=[batch_size, 1])     
     features = {
         'real_images': images,
