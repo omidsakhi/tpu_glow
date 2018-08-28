@@ -1,10 +1,10 @@
 # OpenAI Glow implementation for TPU/GPU
-An attempt to run OpenAI GLOW on GPU and TPU
+An attempt to run OpenAI GLOW on GPU and TPU. Heavily based on the original implementation https://github.com/openai/glow
 
-#Status
+# Status
 Only unconditinal sampling works at the moment
 
-#Results
+# Results
 - Iteration 5000
 
 ![results](https://github.com/omidsakhi/tpu_glow/blob/master/results/005000.jpg)
