@@ -1,20 +1,24 @@
 import tensorflow as tf
-from tensorflow.contrib.layers import variance_scaling_initializer # pylint: disable=E0611
+from tensorflow.contrib.layers import variance_scaling_initializer  # pylint: disable=E0611
 import numpy as np
 
 BATCH_NORM_DECAY = 0.9
 BATCH_NORM_EPSILON = 1e-5
+
 
 def int_shape(x):
     if str(x.get_shape()[0]) != '?':
         return list(map(int, x.get_shape()))
     return [-1]+list(map(int, x.get_shape()[1:]))
 
+
 def dense(name, inputs, channels, is_training, has_bn=True, init_zero=False, relu=False):
     with tf.variable_scope(name):
-        inputs = tf.layers.dense(inputs, channels,bias_initializer=None,use_bias=False,kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),name=name)
+        inputs = tf.layers.dense(inputs, channels, bias_initializer=None, use_bias=False,
+                                 kernel_initializer=tf.truncated_normal_initializer(stddev=0.02), name=name)
         if has_bn:
-            inputs = batch_norm_relu("actnorm", inputs, is_training, relu=relu, init_zero=init_zero)
+            inputs = batch_norm_relu(
+                "actnorm", inputs, is_training, relu=relu, init_zero=init_zero)
         return inputs
 
 
@@ -27,17 +31,20 @@ def dense_with_bias(inputs, channels, name):
             kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
             name=name)
 
+
 def _conv2d(name, inputs, filters, kernel_size, stride, is_training, init_zero=False, relu=False):
     with tf.variable_scope(name):
         inputs = tf.layers.conv2d(
-        inputs, filters, kernel_size,
-        strides=[stride, stride], padding='same',
-        bias_initializer=tf.zeros_initializer(),
-        use_bias=True,
-        kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
-        name=name)
-        inputs = batch_norm_relu("actnorm", inputs, is_training, relu=relu, init_zero=init_zero)        
+            inputs, filters, kernel_size,
+            strides=[stride, stride], padding='same',
+            bias_initializer=tf.zeros_initializer(),
+            use_bias=True,
+            kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
+            name=name)
+        inputs = batch_norm_relu(
+            "actnorm", inputs, is_training, relu=relu, init_zero=init_zero)
     return inputs
+
 
 def _conv2d_with_bias(inputs, filters, kernel_size, stride, name):
     with tf.variable_scope(name):
@@ -48,6 +55,7 @@ def _conv2d_with_bias(inputs, filters, kernel_size, stride, name):
             use_bias=False,
             kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
             name=name)
+
 
 def upsample2d_nearest_neighbour(x):
     #w = int(x.get_shape()[1]) * 2
@@ -64,15 +72,17 @@ def upsample2d_nearest_neighbour(x):
     x = tf.reshape(x, (n_batch, height*2, width*2, n_channels))
     return x
 
-def downsample (x):
-    print (x)
-    x = tf.layers.max_pooling2d(x, [2,2], [2,2])
-    print (x)
 
-def squeeze2d(x, factor=2):    
+def downsample(x):
+    print(x)
+    x = tf.layers.max_pooling2d(x, [2, 2], [2, 2])
+    print(x)
 
-    x = tf.space_to_depth(x, factor)    
-    
+
+def squeeze2d(x, factor=2):
+
+    x = tf.space_to_depth(x, factor)
+
     '''
     assert factor >= 1
     if factor == 1:
@@ -91,9 +101,9 @@ def squeeze2d(x, factor=2):
     return x
 
 
-def unsqueeze2d(x, factor=2):    
-    
-    x = tf.depth_to_space(x, factor)    
+def unsqueeze2d(x, factor=2):
+
+    x = tf.depth_to_space(x, factor)
 
     '''
     assert factor >= 1
@@ -119,10 +129,12 @@ def reverse_features(name, h, reverse=False):
     return h[:, :, :, ::-1]
 
 # Shuffle across the channel dimension
+
+
 def shuffle_features(name, h, indices=None, return_indices=False, reverse=False):
     with tf.variable_scope(name):
 
-        rng = np.random.RandomState( # pylint: disable=E1101
+        rng = np.random.RandomState(  # pylint: disable=E1101
             (abs(hash(tf.get_variable_scope().name))) % 10000000)
 
         if indices == None:
@@ -169,6 +181,7 @@ def flatten_sum(logps):
     else:
         raise Exception()
 
+
 def batch_norm_relu(name, inputs, is_training, relu=True, init_zero=False):
     if init_zero:
         gamma_initializer = tf.zeros_initializer()
@@ -183,11 +196,12 @@ def batch_norm_relu(name, inputs, is_training, relu=True, init_zero=False):
         scale=True,
         training=is_training,
         fused=True,
-        gamma_initializer=gamma_initializer, name = name)
+        gamma_initializer=gamma_initializer, name=name)
 
     if relu:
-        inputs = tf.nn.relu(inputs, name = name + "_relu")
+        inputs = tf.nn.relu(inputs, name=name + "_relu")
     return inputs
+
 
 def standard_gaussian(shape):
     return gaussian_diag(tf.zeros(shape), tf.zeros(shape))
@@ -201,7 +215,8 @@ def gaussian_diag(mean, logsd):
     o.eps = tf.random_normal(tf.shape(mean))
     o.sample = mean + tf.exp(logsd) * o.eps
     o.sample2 = staticmethod(lambda eps: mean + tf.exp(logsd) * eps)
-    o.logps = staticmethod(lambda x: -0.5 * (np.log(2 * np.pi) + 2. * logsd + (x - mean) ** 2 / tf.exp(2. * logsd) ))
+    o.logps = staticmethod(lambda x: -0.5 * (np.log(2 * np.pi) +
+                                             2. * logsd + (x - mean) ** 2 / tf.exp(2. * logsd)))
     o.logp = staticmethod(lambda x: flatten_sum(o.logps(x)))
     o.get_eps = staticmethod(lambda x: (x - mean) / tf.exp(logsd))
     return o
@@ -249,15 +264,18 @@ def _symmetric_matrix_square_root(mat, eps=1e-10):
     return tf.matmul(
         tf.matmul(u, tf.diag(si)), v, transpose_b=True)
 
+
 def scale_bias(name, x, scale_factor=1., logdet=None, logscale_factor=3., reverse=False):
     with tf.variable_scope(name):
         if not reverse:
             x = bias("bias", x, reverse)
-            x = scale("scale", x, scale_factor, logdet, logscale_factor, reverse)
+            x = scale("scale", x, scale_factor,
+                      logdet, logscale_factor, reverse)
             if logdet != None:
                 x, logdet = x
         else:
-            x = scale("scale", x, scale_factor, logdet, logscale_factor, reverse)
+            x = scale("scale", x, scale_factor,
+                      logdet, logscale_factor, reverse)
             if logdet != None:
                 x, logdet = x
             x = bias("bias", x, reverse)
@@ -265,19 +283,22 @@ def scale_bias(name, x, scale_factor=1., logdet=None, logscale_factor=3., revers
             return x, logdet
         return x
 
+
 def bias(name, x, reverse=False):
     shape = x.get_shape()
     assert len(shape) == 2 or len(shape) == 4
     if len(shape) == 2:
         _shape = (1, int_shape(x)[1])
     elif len(shape) == 4:
-        _shape = (1, 1, 1, int_shape(x)[3])        
-    b = tf.get_variable(name, _shape, dtype=tf.float32, initializer=tf.zeros_initializer())
+        _shape = (1, 1, 1, int_shape(x)[3])
+    b = tf.get_variable(name, _shape, dtype=tf.float32,
+                        initializer=tf.zeros_initializer())
     if not reverse:
         x += b
     else:
         x -= b
     return x
+
 
 def scale(name, x, scale=1., logdet=None, logscale_factor=3., reverse=False):
     shape = x.get_shape()
@@ -287,7 +308,7 @@ def scale(name, x, scale=1., logdet=None, logscale_factor=3., reverse=False):
         logdet_factor = 1
     elif len(shape) == 4:
         _shape = (1, 1, 1, int_shape(x)[3])
-        logdet_factor = int(shape[1])*int(shape[2])    
+        logdet_factor = int(shape[1])*int(shape[2])
     s = tf.get_variable(name, _shape, initializer=tf.ones_initializer())
     logs = tf.log(tf.abs(s) + 1e-6)
     if not reverse:

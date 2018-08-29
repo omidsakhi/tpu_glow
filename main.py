@@ -31,7 +31,7 @@ def model_fn(features, labels, mode, params):
         # PREDICT #
         ###########
         predictions = {
-            'generated_images': model.sample(y, is_training=False, top_shape=[16, 16, 48])
+            'generated_images': model.sample(y, is_training=False)
         }
         return tpu_estimator.TPUEstimatorSpec(mode=mode, predictions=predictions)
 
@@ -199,18 +199,18 @@ if __name__ == "__main__":
                         default=10e-5, help="Adam eps")
     parser.add_argument("--memory_saving_gradients", type=bool, default=True,
                         help="Use memory saving gradients")
-
+                        
     # Model hyperparams:
-    parser.add_argument("--n_levels", type=int, default=3,
-                        help="Number of levels")
-    parser.add_argument("--depth", type=int, default=10,
-                        help="Depth of network")
     parser.add_argument("--width", type=int, default=-1,
                         help="Width of hidden layers")
+    parser.add_argument("--depth", type=int, default=4,
+                        help="Depth of network")
     parser.add_argument("--weight_y", type=float, default=0.00,
                         help="Weight of log p(y|x) in weighted loss")
     parser.add_argument("--n_bits_x", type=int, default=8,
                         help="Number of bits of x")
+    parser.add_argument("--n_levels", type=int, default=5,
+                        help="Number of levels")
     parser.add_argument("--n_y", type=int, default=1,
                         help="Number of final layer output")
 

@@ -1,7 +1,7 @@
 import ops
 import numpy as np
 import tensorflow as tf
-
+import memory_saving_gradients
 
 def codec(cfg):
 
@@ -91,7 +91,7 @@ def f_(name, h, cfg, n_out=None, is_training=False):
         h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training, relu=True)
         h = ops._conv2d("l_2", h, width, [1, 1], 1, is_training, relu=True)
         h = ops._conv2d("l_3", h, n_out, [
-                        1, 1], 1, is_training, relu=False, init_zero=True)
+                        3, 3], 1, is_training, relu=False, init_zero=True)
     return h
 
 
@@ -256,20 +256,22 @@ def checkpoint(z1, z2, logdet):
     logdet = combined[:, -1]
     z1 = tf.reshape(combined[:, 0:zshape[1]*zshape[2]
                              * zshape[3]], [-1, zshape[1], zshape[2], zshape[3]])
-    z2 = tf.reshape(combined[:, zshape[1]*zshape[2]*zshape[3]:-1], [-1, zshape[1], zshape[2], zshape[3]])
-    return z1, z2, logdet
+    z2 = tf.reshape(combined[:, zshape[1]*zshape[2]*zshape[3]                    :-1], [-1, zshape[1], zshape[2], zshape[3]])
+    return z1, z2, logdet    
 
-
-def prior(name, y_onehot, cfg, top_shape):
+def prior(name, y_onehot, cfg):
 
     with tf.variable_scope(name):
-        n_z = top_shape[-1]
-        h = tf.zeros([tf.shape(y_onehot)[0]]+top_shape[:2]+[2*n_z])
+        cfg.top_shape = [4, 4, 192]
+
+        n_z = cfg.top_shape[-1]
+
+        h = tf.zeros([tf.shape(y_onehot)[0]]+cfg.top_shape[:2]+[2*n_z])
         if cfg.learntop:
             h = ops._conv2d('p', h, 2*n_z, 3, 1, True)
         if cfg.ycond:
             h += tf.reshape(ops.dense("y_emb", y_onehot, 2*n_z,
-                                      True, init_zero=True), [-1, 1, 1, 2 * n_z])
+                            True, init_zero=True), [-1, 1, 1, 2 * n_z])
 
         pz = ops.gaussian_diag(h[:, :, :, :n_z], h[:, :, :, n_z:])
 
@@ -312,18 +314,17 @@ class model(object):
             y_onehot = tf.cast(tf.one_hot(y, self.cfg.n_y, 1, 0), 'float32')
 
             # Discrete -> Continuous
-            objective = tf.zeros_like(x, dtype='float32')[:, 0, 0, 0]
+            objective = tf.zeros_like(x, dtype='float32')[:, 0, 0, 0]            
             z = x + tf.random_uniform(tf.shape(x), 0, 1./self.cfg.n_bins)
-            objective += - np.log(self.cfg.n_bins) * \
-                np.prod(ops.int_shape(z)[1:])
+            objective += - np.log(self.cfg.n_bins) * np.prod(ops.int_shape(z)[1:])
 
             # Encode
             z = ops.squeeze2d(z, 2)  # > 16x16x12
-            z, objective, _ = self.encoder(z, objective, is_training)
+            z, objective, _ = self.encoder(z, objective, is_training)                        
 
             # Prior
-            logp, _, _ = prior("prior", y_onehot, self.cfg,
-                               ops.int_shape(z)[1:])
+            self.cfg.top_shape = ops.int_shape(z)[1:]
+            logp, _, _ = prior("prior", y_onehot, self.cfg)            
 
             objective += logp(z)
 
@@ -358,10 +359,10 @@ class model(object):
         return local_loss
 
     # === Sampling function
-    def sample(self, y, is_training, top_shape):
+    def sample(self, y, is_training):
         with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
             y_onehot = tf.cast(tf.one_hot(y, self.cfg.n_y, 1, 0), 'float32')
-            _, sample, _ = prior("prior", y_onehot, self.cfg, top_shape)
+            _, sample, _ = prior("prior", y_onehot, self.cfg)
             z = sample()
             x = self.decoder(z, is_training)
             x = ops.unsqueeze2d(x, 2)  # 8x8x12 -> 16x16x3
@@ -376,10 +377,9 @@ class model(object):
             y_onehot = tf.cast(tf.one_hot(y, self.cfg.n_y, 1, 0), 'float32')
 
             # Discrete -> Continuous
-            objective = tf.zeros_like(x, dtype='float32')[:, 0, 0, 0]
+            objective = tf.zeros_like(x, dtype='float32')[:, 0, 0, 0]            
             z = x + tf.random_uniform(tf.shape(x), 0, 1. / self.cfg.n_bins)
-            objective += - np.log(self.cfg.n_bins) * \
-                np.prod(ops.int_shape(z)[1:])
+            objective += - np.log(self.cfg.n_bins) * np.prod(ops.int_shape(z)[1:])
 
             # Encode
             z = ops.squeeze2d(z, 2)  # > 16x16x12
@@ -387,8 +387,7 @@ class model(object):
 
             # Prior
             self.cfg.top_shape = ops.int_shape(z)[1:]
-            logp, _, _eps = prior(
-                "prior", y_onehot, self.cfg, top_shape=None)  # TODO
+            logp, _, _eps = prior("prior", y_onehot, self.cfg)
             objective += logp(z)
             eps.append(_eps(z))
         return eps
@@ -396,10 +395,9 @@ class model(object):
     def f_decode(self, y, eps, is_training):
         with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
             y_onehot = tf.cast(tf.one_hot(y, self.cfg.n_y, 1, 0), 'float32')
-            _, sample, _ = prior(
-                "prior", y_onehot, self.cfg, top_shape=None)  # TODO
+            _, sample, _ = prior("prior", y_onehot, self.cfg)
             z = sample(eps=eps[-1])
-            z = self.decoder(z, is_training=is_training, eps=eps[:-1])
-            z = ops.unsqueeze2d(z, 2)  # 8x8x12 -> 16x16x3
-            x = self.postprocess(z)
+            z = self.decoder(z, is_training = is_training, eps=eps[:-1])
+            z = ops.unsqueeze2d(z, 2)  # 8x8x12 -> 16x16x3     
+            x = self.postprocess(z)       
         return x
