@@ -10,6 +10,8 @@ import math
 import ops
 import memory_saving_gradients
 import celeba
+from AMSGrad import AMSGrad
+
 global dataset
 dataset = celeba
 
@@ -31,7 +33,7 @@ def model_fn(features, labels, mode, params):
         # PREDICT #
         ###########
         predictions = {
-            'generated_images': model.sample(y, is_training=False)
+            'generated_images': model.sample(y, is_training=False, temp=0.4)
         }
         return tpu_estimator.TPUEstimatorSpec(mode=mode, predictions=predictions)
 
@@ -51,8 +53,9 @@ def model_fn(features, labels, mode, params):
             for v in tf.trainable_variables():
                 tf.summary.histogram(v.name.replace(':', '_'), v)
 
-        optimizer = tf.train.AdamOptimizer(
-            learning_rate=cfg.lr, beta1=cfg.beta1, epsilon=cfg.adam_eps)
+        #optimizer = tf.train.AdamOptimizer(
+        #    learning_rate=cfg.lr, beta1=cfg.beta1, epsilon=cfg.adam_eps)
+        optimizer = AMSGrad(learning_rate=cfg.lr, beta1=cfg.beta1, beta2=cfg.beta2, epsilon=cfg.adam_eps)
 
         if cfg.use_tpu:
             optimizer = tpu_optimizer.CrossShardOptimizer(optimizer)
@@ -61,7 +64,8 @@ def model_fn(features, labels, mode, params):
             if cfg.memory_saving_gradients:
                 from memory_saving_gradients import gradients
                 gs = gradients(f_loss, tf.trainable_variables())
-                grads_and_vars = list(zip(gs, tf.trainable_variables()))
+                capped_gvs = [tf.clip_by_value(g, -1., 1.) for g in gs]
+                grads_and_vars = list(zip(capped_gvs, tf.trainable_variables()))
                 train_op = optimizer.apply_gradients(grads_and_vars)
             else:
                 train_op = optimizer.minimize(
@@ -190,13 +194,11 @@ if __name__ == "__main__":
                         help="Number of images for evaluation")
     parser.add_argument("--batch_size", type=int, default=64,
                         help="Minibatch size")
-    parser.add_argument("--lr", type=float, default=0.001,
+    parser.add_argument("--lr", type=float, default=0.01,
                         help="Base learning rate")
-    parser.add_argument("--warmup", type=float, default=2000.0,
-                        help="Warmup steps")
-    parser.add_argument("--beta1", type=float, default=.9, help="Adam beta1")
-    parser.add_argument("--adam_eps", type=float,
-                        default=10e-5, help="Adam eps")
+    parser.add_argument("--beta1", type=float, default=.9, help="Adam/AMSGrad beta1")
+    parser.add_argument("--beta2", type=float, default=.99, help="Adam/AMSGrad beta2")
+    parser.add_argument("--adam_eps", type=float, default=10e-8, help="Adam/AMSGrad eps")
     parser.add_argument("--memory_saving_gradients", type=bool, default=True,
                         help="Use memory saving gradients")
                         

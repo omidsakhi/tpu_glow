@@ -38,7 +38,7 @@ def _conv2d(name, inputs, filters, kernel_size, stride, is_training, init_zero=F
             inputs, filters, kernel_size,
             strides=[stride, stride], padding='same',
             bias_initializer=tf.zeros_initializer(),
-            use_bias=True,
+            use_bias=False,
             kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
             name=name)
         inputs = batch_norm_relu(
@@ -213,8 +213,9 @@ def gaussian_diag(mean, logsd):
     o.mean = mean
     o.logsd = logsd
     o.eps = tf.random_normal(tf.shape(mean))
-    o.sample = mean + tf.exp(logsd) * o.eps
+    o.sample = mean + tf.exp(logsd) * o.eps    
     o.sample2 = staticmethod(lambda eps: mean + tf.exp(logsd) * eps)
+    o.sample3 = staticmethod(lambda temp: mean + tf.exp(logsd) * o.eps * temp)
     o.logps = staticmethod(lambda x: -0.5 * (np.log(2 * np.pi) +
                                              2. * logsd + (x - mean) ** 2 / tf.exp(2. * logsd)))
     o.logp = staticmethod(lambda x: flatten_sum(o.logps(x)))
@@ -309,8 +310,8 @@ def scale(name, x, scale=1., logdet=None, logscale_factor=3., reverse=False):
     elif len(shape) == 4:
         _shape = (1, 1, 1, int_shape(x)[3])
         logdet_factor = int(shape[1])*int(shape[2])
-    s = tf.get_variable(name, _shape, initializer=tf.ones_initializer())
-    logs = tf.log(tf.abs(s) + 1e-6)
+    s = tf.get_variable(name, _shape, initializer=tf.ones_initializer()) + 1e-6
+    logs = tf.maximum(tf.log(tf.abs(s)), -6)
     if not reverse:
         x *= s
     else:

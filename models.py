@@ -279,13 +279,15 @@ def prior(name, y_onehot, cfg):
         objective = pz.logp(z1)
         return objective
 
-    def sample(eps=None, eps_std=None):
+    def sample(eps=None, eps_std=None, temp=None):
         if eps is not None:
             # Already sampled eps. Don't use eps_std
-            z = pz.sample2(eps)
+            z = pz.sample2(eps)                
         elif eps_std is not None:
             # Sample with given eps_std
             z = pz.sample2(pz.eps * tf.reshape(eps_std, [-1, 1, 1, 1]))
+        elif temp is not None:
+            z = pz.sample3(temp)
         else:
             # Sample normally
             z = pz.sample
@@ -359,11 +361,11 @@ class model(object):
         return local_loss
 
     # === Sampling function
-    def sample(self, y, is_training):
+    def sample(self, y, is_training, temp):
         with tf.variable_scope('model', reuse=tf.AUTO_REUSE):
             y_onehot = tf.cast(tf.one_hot(y, self.cfg.n_y, 1, 0), 'float32')
             _, sample, _ = prior("prior", y_onehot, self.cfg)
-            z = sample()
+            z = sample(temp = temp)
             x = self.decoder(z, is_training)
             x = ops.unsqueeze2d(x, 2)  # 8x8x12 -> 16x16x3
             x = self.postprocess(x)
