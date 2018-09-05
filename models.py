@@ -83,15 +83,14 @@ def f_(name, h, cfg, n_out=None, is_training=False):
     if width == -1:
         assert(int(h.get_shape()[1]) == int(h.get_shape()[2]))
         n_hw = int(h.get_shape()[2])
-        hw_map = {1: 512, 2: 512, 4: 512, 8: 256,
-                  16: 256, 32: 256, 64: 128, 128: 64}
+        hw_map = {1: 512, 2: 512, 4: 512, 8: 256, 16: 256, 32: 256, 64: 128, 128: 64}
         width = hw_map[n_hw]
     n_out = n_out or int(h.get_shape()[3])
     with tf.variable_scope(name):
-        h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training, relu=True)
-        h = ops._conv2d("l_2", h, width, [1, 1], 1, is_training, relu=True)
-        h = ops._conv2d("l_3", h, n_out, [
-                        3, 3], 1, is_training, relu=False, init_zero=True)
+        h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training, relu=True)        
+        #h = ops._conv2d("l_2", h, width, [3, 1], 1, is_training, relu=True)        
+        #h = ops._conv2d("l_3", h, width, [1, 3], 1, is_training, relu=True)
+        h = ops._conv2d("l_2", h, n_out, [3, 3], 1, is_training, relu=False, init_zero=True)
     return h
 
 
@@ -127,7 +126,7 @@ def split2d_reverse(name, z1, z2, eps, eps_std):
 def split2d_prior(z):
     n_z2 = int(z.get_shape()[3])
     n_z1 = n_z2
-    h = ops._conv2d_with_bias(
+    h = ops._conv2d_zeros(
         z, 2 * n_z1, kernel_size=3, stride=1, name="conv")
 
     mean = h[:, :, :, 0::2]
@@ -268,8 +267,10 @@ def prior(name, y_onehot, cfg):
 
         h = tf.zeros([tf.shape(y_onehot)[0]]+cfg.top_shape[:2]+[2*n_z])
         if cfg.learntop:
+            assert(False)
             h = ops._conv2d('p', h, 2*n_z, 3, 1, True)
         if cfg.ycond:
+            assert(False)
             h += tf.reshape(ops.dense("y_emb", y_onehot, 2*n_z,
                             True, init_zero=True), [-1, 1, 1, 2 * n_z])
 
@@ -337,7 +338,7 @@ class model(object):
 
             # Predictive loss
             if self.cfg.weight_y > 0 and self.cfg.ycond:
-
+                assert(False)
                 # Classification loss
                 h_y = tf.reduce_mean(z, axis=[1, 2])
                 y_logits = ops.dense(

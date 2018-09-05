@@ -31,6 +31,9 @@ def dense_with_bias(inputs, channels, name):
             kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
             name=name)
 
+def pixel_norm(x, epsilon=1e-8):
+    with tf.variable_scope('PixelNorm'):
+        return x * tf.rsqrt(tf.reduce_mean(tf.square(x), axis=3, keepdims=True) + epsilon)
 
 def _conv2d(name, inputs, filters, kernel_size, stride, is_training, init_zero=False, relu=False):
     with tf.variable_scope(name):
@@ -38,24 +41,30 @@ def _conv2d(name, inputs, filters, kernel_size, stride, is_training, init_zero=F
             inputs, filters, kernel_size,
             strides=[stride, stride], padding='same',
             bias_initializer=tf.zeros_initializer(),
-            use_bias=False,
-            kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
+            use_bias=True,
+            kernel_initializer=tf.truncated_normal_initializer(stddev=0.05),
             name=name)
-        inputs = batch_norm_relu(
-            "actnorm", inputs, is_training, relu=relu, init_zero=init_zero)
+        if relu:
+            inputs= tf.nn.relu(inputs)        
+        #else:
+        inputs = pixel_norm(inputs)
+        #inputs = batch_norm_relu(
+        #    "actnorm", inputs, is_training, relu=relu, init_zero=init_zero)
+
     return inputs
 
 
-def _conv2d_with_bias(inputs, filters, kernel_size, stride, name):
+def _conv2d_zeros(x, filters, kernel_size, stride, name):
     with tf.variable_scope(name):
-        return tf.layers.conv2d(
-            inputs, filters, [kernel_size, kernel_size],
+        x = tf.layers.conv2d(
+            x, filters, [kernel_size, kernel_size],
             strides=[stride, stride], padding='same',
-            bias_initializer=None,
-            use_bias=False,
+            bias_initializer=tf.zeros_initializer(),
+            use_bias=True,
             kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
-            name=name)
-
+            name="conv2d_zeros")
+        x *= tf.exp(tf.get_variable("logs",[1, filters], initializer=tf.zeros_initializer()))
+        return x
 
 def upsample2d_nearest_neighbour(x):
     #w = int(x.get_shape()[1]) * 2
@@ -81,9 +90,8 @@ def downsample(x):
 
 def squeeze2d(x, factor=2):
 
-    x = tf.space_to_depth(x, factor)
+    #x = tf.space_to_depth(x, factor)
 
-    '''
     assert factor >= 1
     if factor == 1:
         return x
@@ -96,16 +104,14 @@ def squeeze2d(x, factor=2):
                        width//factor, factor, n_channels])
     x = tf.transpose(x, [0, 1, 3, 5, 2, 4])
     x = tf.reshape(x, [-1, height//factor, width //
-                       factor, n_channels*factor*factor])
-    '''
+                       factor, n_channels*factor*factor])    
     return x
 
 
 def unsqueeze2d(x, factor=2):
 
-    x = tf.depth_to_space(x, factor)
+    #x = tf.depth_to_space(x, factor)
 
-    '''
     assert factor >= 1
     if factor == 1:
         return x
@@ -119,7 +125,6 @@ def unsqueeze2d(x, factor=2):
     x = tf.transpose(x, [0, 1, 4, 2, 5, 3])
     x = tf.reshape(x, (-1, int(height*factor),
                        int(width*factor), int(n_channels/factor**2)))
-    '''
     return x
 
 # Reverse features across channel dimension
@@ -311,7 +316,7 @@ def scale(name, x, scale=1., logdet=None, logscale_factor=3., reverse=False):
         _shape = (1, 1, 1, int_shape(x)[3])
         logdet_factor = int(shape[1])*int(shape[2])
     s = tf.get_variable(name, _shape, initializer=tf.ones_initializer()) + 1e-6
-    logs = tf.maximum(tf.log(tf.abs(s)), -6)
+    logs = tf.log(tf.abs(s))
     if not reverse:
         x *= s
     else:

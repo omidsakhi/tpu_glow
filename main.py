@@ -10,7 +10,6 @@ import math
 import ops
 import memory_saving_gradients
 import celeba
-from AMSGrad import AMSGrad
 
 global dataset
 dataset = celeba
@@ -33,7 +32,7 @@ def model_fn(features, labels, mode, params):
         # PREDICT #
         ###########
         predictions = {
-            'generated_images': model.sample(y, is_training=False, temp=0.4)
+            'generated_images': model.sample(y, is_training=False, temp=0.75)
         }
         return tpu_estimator.TPUEstimatorSpec(mode=mode, predictions=predictions)
 
@@ -52,10 +51,9 @@ def model_fn(features, labels, mode, params):
         if not cfg.use_tpu:
             for v in tf.trainable_variables():
                 tf.summary.histogram(v.name.replace(':', '_'), v)
-
-        #optimizer = tf.train.AdamOptimizer(
-        #    learning_rate=cfg.lr, beta1=cfg.beta1, epsilon=cfg.adam_eps)
-        optimizer = AMSGrad(learning_rate=cfg.lr, beta1=cfg.beta1, beta2=cfg.beta2, epsilon=cfg.adam_eps)
+        
+        optimizer = tf.train.AdamOptimizer(
+            learning_rate=cfg.lr, beta1=cfg.beta1, epsilon=cfg.adam_eps)        
 
         if cfg.use_tpu:
             optimizer = tpu_optimizer.CrossShardOptimizer(optimizer)
@@ -64,12 +62,12 @@ def model_fn(features, labels, mode, params):
             if cfg.memory_saving_gradients:
                 from memory_saving_gradients import gradients
                 gs = gradients(f_loss, tf.trainable_variables())
-                capped_gvs = [tf.clip_by_value(g, -1., 1.) for g in gs]
-                grads_and_vars = list(zip(capped_gvs, tf.trainable_variables()))
-                train_op = optimizer.apply_gradients(grads_and_vars)
             else:
-                train_op = optimizer.minimize(
-                    f_loss, var_list=tf.trainable_variables())
+                gs = tf.gradients(f_loss, tf.trainable_variables())
+            if cfg.use_gradient_clipping:
+                gs = [tf.clip_by_value(g, -100., 100.) for g in gs]
+            grads_and_vars = list(zip(gs, tf.trainable_variables()))
+            train_op = optimizer.apply_gradients(grads_and_vars)
             increment_step = tf.assign_add(
                 tf.train.get_or_create_global_step(), 1)
             joint_op = tf.group([train_op, increment_step])
@@ -177,7 +175,7 @@ def main(cfg):
 
 
 if __name__ == "__main__":
-
+    
     import argparse
     parser = argparse.ArgumentParser()
 
@@ -186,7 +184,7 @@ if __name__ == "__main__":
                         help="Mode is either train or eval")
     parser.add_argument("--train_steps", type=int, default=5000000,
                         help="Train epoch size")
-    parser.add_argument("--train_steps_per_eval", type=int, default=5000 if USE_TPU else 200,
+    parser.add_argument("--train_steps_per_eval", type=int, default=5000 if USE_TPU else 2000,
                         help="Steps per eval and image generation")
     parser.add_argument("--iterations_per_loop", type=int, default=500 if USE_TPU else 100,
                         help="Steps per interior TPU loop")
@@ -194,13 +192,15 @@ if __name__ == "__main__":
                         help="Number of images for evaluation")
     parser.add_argument("--batch_size", type=int, default=64,
                         help="Minibatch size")
-    parser.add_argument("--lr", type=float, default=0.01,
+    parser.add_argument("--lr", type=float, default=0.0015,
                         help="Base learning rate")
     parser.add_argument("--beta1", type=float, default=.9, help="Adam/AMSGrad beta1")
     parser.add_argument("--beta2", type=float, default=.99, help="Adam/AMSGrad beta2")
     parser.add_argument("--adam_eps", type=float, default=10e-8, help="Adam/AMSGrad eps")
-    parser.add_argument("--memory_saving_gradients", type=bool, default=True,
+    parser.add_argument("--memory_saving_gradients", type=bool, default=False,
                         help="Use memory saving gradients")
+    parser.add_argument("--use_gradient_clipping", type=bool, default=True,
+                        help="Use gradient clipping")
                         
     # Model hyperparams:
     parser.add_argument("--width", type=int, default=-1,
