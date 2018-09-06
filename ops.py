@@ -48,6 +48,7 @@ def _conv2d(name, inputs, filters, kernel_size, stride, is_training, init_zero=F
         #    inputs = tf.nn.relu(inputs)
         #else:
         #    inputs = tf.sigmoid(inputs)
+        #inputs = pixel_norm(inputs)
         inputs = batch_norm_relu(
             "actnorm", inputs, is_training, relu=relu, init_zero=init_zero)
 
