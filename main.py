@@ -59,18 +59,19 @@ def model_fn(features, labels, mode, params):
             optimizer = tpu_optimizer.CrossShardOptimizer(optimizer)
 
         with tf.control_dependencies(tf.get_collection(tf.GraphKeys.UPDATE_OPS)):
-            if cfg.memory_saving_gradients:
-                from memory_saving_gradients import gradients
-                gs = gradients(f_loss, tf.trainable_variables())
-            else:
-                gs = tf.gradients(f_loss, tf.trainable_variables())
-            if cfg.use_gradient_clipping:
-                gs = [tf.clip_by_value(g, -100., 100.) for g in gs]
-            grads_and_vars = list(zip(gs, tf.trainable_variables()))
-            train_op = optimizer.apply_gradients(grads_and_vars)
-            increment_step = tf.assign_add(
-                tf.train.get_or_create_global_step(), 1)
-            joint_op = tf.group([train_op, increment_step])
+            with tf.variable_scope('TrainOps'):
+                if cfg.memory_saving_gradients:
+                    from memory_saving_gradients import gradients
+                    gs = gradients(f_loss, tf.trainable_variables())
+                else:
+                    gs = tf.gradients(f_loss, tf.trainable_variables())
+                if cfg.use_gradient_clipping:
+                    gs = [tf.clip_by_value(g, -100., 100.) for g in gs]
+                grads_and_vars = list(zip(gs, tf.trainable_variables()))
+                train_op = optimizer.apply_gradients(grads_and_vars)
+                increment_step = tf.assign_add(
+                    tf.train.get_or_create_global_step(), 1)
+                joint_op = tf.group([train_op, increment_step])
 
             return tpu_estimator.TPUEstimatorSpec(
                 mode=mode,
@@ -184,9 +185,9 @@ if __name__ == "__main__":
                         help="Mode is either train or eval")
     parser.add_argument("--train_steps", type=int, default=5000000,
                         help="Train epoch size")
-    parser.add_argument("--train_steps_per_eval", type=int, default=5000 if USE_TPU else 2000,
+    parser.add_argument("--train_steps_per_eval", type=int, default=5000 if USE_TPU else 1000,
                         help="Steps per eval and image generation")
-    parser.add_argument("--iterations_per_loop", type=int, default=500 if USE_TPU else 100,
+    parser.add_argument("--iterations_per_loop", type=int, default=500 if USE_TPU else 200,
                         help="Steps per interior TPU loop")
     parser.add_argument("--num_eval_images", type=int, default=100,
                         help="Number of images for evaluation")
@@ -203,7 +204,7 @@ if __name__ == "__main__":
                         help="Use gradient clipping")
                         
     # Model hyperparams:
-    parser.add_argument("--width", type=int, default=-1,
+    parser.add_argument("--width", type=int, default=512,
                         help="Width of hidden layers")
     parser.add_argument("--depth", type=int, default=4,
                         help="Depth of network")

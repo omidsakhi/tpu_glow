@@ -42,12 +42,17 @@ def _conv2d(name, inputs, filters, kernel_size, stride, is_training, init_zero=F
             strides=[stride, stride], padding='same',
             bias_initializer=tf.zeros_initializer(),
             use_bias=True,
-            kernel_initializer=tf.truncated_normal_initializer(stddev=0.05),
+            kernel_initializer=tf.truncated_normal_initializer(stddev=0.01),
             name=name)
         if relu:
-            inputs= tf.nn.relu(inputs)        
+            inputs= tf.nn.relu(inputs)
+        else:
+            inputs = tf.sigmoid(inputs)
+        #if init_zero:
+        #    _shape = (1, 1, 1, int_shape(inputs)[3])
+        #    inputs *= tf.get_variable('scale', _shape, initializer=tf.ones_initializer())
         #else:
-        inputs = pixel_norm(inputs)
+        #inputs = pixel_norm(inputs)
         #inputs = batch_norm_relu(
         #    "actnorm", inputs, is_training, relu=relu, init_zero=init_zero)
 

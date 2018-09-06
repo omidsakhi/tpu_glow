@@ -83,7 +83,7 @@ def f_(name, h, cfg, n_out=None, is_training=False):
     if width == -1:
         assert(int(h.get_shape()[1]) == int(h.get_shape()[2]))
         n_hw = int(h.get_shape()[2])
-        hw_map = {1: 512, 2: 512, 4: 512, 8: 256, 16: 256, 32: 256, 64: 128, 128: 64}
+        hw_map = {1: 512, 2: 512, 4: 512, 8: 256, 16: 512, 32: 512, 64: 512, 128: 64}
         width = hw_map[n_hw]
     n_out = n_out or int(h.get_shape()[3])
     with tf.variable_scope(name):
