@@ -12,7 +12,7 @@ def codec(cfg):
         assert n_z % 2 == 0
         z1, z2 = tf.split(z, 2, axis=3)
         for i in range(cfg.n_levels):
-            z1, z2, objective = revnet2d(
+            z1, z2, objective = revnet2d(i,
                 str(i), z1, z2, objective, cfg, is_training=is_training)
             if i < cfg.n_levels-1:
                 z1, z2, objective, _eps = split2d(
@@ -30,7 +30,7 @@ def codec(cfg):
             if i < cfg.n_levels-1:
                 z1, z2 = split2d_reverse(
                     "pool"+str(i), z1, z2, eps=eps[i], eps_std=eps_std)
-            z1, z2, _ = revnet2d(str(i), z1, z2, 0, cfg,
+            z1, z2, _ = revnet2d(i, str(i), z1, z2, 0, cfg,
                                  is_training=is_training, reverse=True)
         z = tf.concat([z1, z2], 3)
         return z
@@ -38,10 +38,14 @@ def codec(cfg):
     return encoder, decoder
 
 
-def revnet2d(name, z1, z2, logdet, cfg, is_training, reverse=False):
+def revnet2d(index, name, z1, z2, logdet, cfg, is_training, reverse=False):
+    if cfg.depth == -1:
+        depth = cfg.depth_dict[index]
+    else:
+        depth = cfg.depth
     with tf.variable_scope(name):
         if not reverse:
-            for i in range(cfg.depth):
+            for i in range(depth):
                 if cfg.memory_saving_gradients:
                     z1, z2, logdet = checkpoint(z1, z2, logdet)
                 z1, z2, logdet = revnet2d_step(
@@ -49,7 +53,7 @@ def revnet2d(name, z1, z2, logdet, cfg, is_training, reverse=False):
             if cfg.memory_saving_gradients:
                 z1, z2, logdet = checkpoint(z1, z2, logdet)
         else:
-            for i in reversed(range(cfg.depth)):
+            for i in reversed(range(depth)):
                 z1, z2, logdet = revnet2d_step(
                     str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)
     return z1, z2, logdet
@@ -82,9 +86,8 @@ def f_(name, h, cfg, n_out=None, is_training=False):
     width = cfg.width
     if width == -1:
         assert(int(h.get_shape()[1]) == int(h.get_shape()[2]))
-        n_hw = int(h.get_shape()[2])
-        hw_map = {1: 512, 2: 512, 4: 512, 8: 256, 16: 512, 32: 512, 64: 512, 128: 64}
-        width = hw_map[n_hw]
+        img_width = int(h.get_shape()[2])        
+        width = cfg.width_dict[img_width]
     n_out = n_out or int(h.get_shape()[3])
     with tf.variable_scope(name):
         h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training, relu=True)        
@@ -260,8 +263,9 @@ def checkpoint(z1, z2, logdet):
 
 def prior(name, y_onehot, cfg):
 
-    with tf.variable_scope(name):
-        cfg.top_shape = [4, 4, 192]
+    with tf.variable_scope(name):        
+
+        cfg.top_shape = [8, 8, 96]
 
         n_z = cfg.top_shape[-1]
 

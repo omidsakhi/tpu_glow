@@ -185,13 +185,13 @@ if __name__ == "__main__":
                         help="Mode is either train or eval")
     parser.add_argument("--train_steps", type=int, default=5000000,
                         help="Train epoch size")
-    parser.add_argument("--train_steps_per_eval", type=int, default=5000 if USE_TPU else 1000,
+    parser.add_argument("--train_steps_per_eval", type=int, default=5000 if USE_TPU else 2000,
                         help="Steps per eval and image generation")
     parser.add_argument("--iterations_per_loop", type=int, default=500 if USE_TPU else 200,
                         help="Steps per interior TPU loop")
     parser.add_argument("--num_eval_images", type=int, default=100,
                         help="Number of images for evaluation")
-    parser.add_argument("--batch_size", type=int, default=36,
+    parser.add_argument("--batch_size", type=int, default=32,
                         help="Minibatch size")
     parser.add_argument("--lr", type=float, default=0.001,
                         help="Base learning rate")
@@ -205,14 +205,14 @@ if __name__ == "__main__":
                         
     # Model hyperparams:
     parser.add_argument("--width", type=int, default=-1,
-                        help="Width of hidden layers")
-    parser.add_argument("--depth", type=int, default=4,
-                        help="Depth of network")
+                        help="Width of hidden layers (-1 for width_dict)")
+    parser.add_argument("--depth", type=int, default=-1,
+                        help="Depth of network (-1 for depth_dict)")
     parser.add_argument("--weight_y", type=float, default=0.00,
                         help="Weight of log p(y|x) in weighted loss")
     parser.add_argument("--n_bits_x", type=int, default=8,
                         help="Number of bits of x")
-    parser.add_argument("--n_levels", type=int, default=5,
+    parser.add_argument("--n_levels", type=int, default=4,
                         help="Number of levels")
     parser.add_argument("--n_y", type=int, default=1,
                         help="Number of final layer output")
@@ -242,6 +242,8 @@ if __name__ == "__main__":
                         help="Output model directory")
 
     cfg = parser.parse_args()
+    cfg.width_dict = {1: 512, 2: 512, 4: 512, 8: 256, 16: 512, 32: 512, 64: 512, 128: 64}
+    cfg.depth_dict = {0: 2, 1: 4, 2: 16, 3: 24, 4: 32, 5: 64}    
 
     tf.logging.set_verbosity(tf.logging.INFO)
     main(cfg)
