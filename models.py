@@ -90,7 +90,7 @@ def f_(name, h, cfg, n_out=None, is_training=False):
         h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training, relu=True)        
         #h = ops._conv2d("l_2", h, width, [3, 1], 1, is_training, relu=True)        
         #h = ops._conv2d("l_3", h, width, [1, 3], 1, is_training, relu=True)
-        h = ops._conv2d("l_2", h, n_out, [3, 3], 1, is_training, relu=False, init_zero=True)
+        h = ops._conv2d("l_4", h, n_out, [3, 3], 1, is_training, relu=False, init_zero=True)
     return h
 
 

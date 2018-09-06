@@ -191,20 +191,20 @@ if __name__ == "__main__":
                         help="Steps per interior TPU loop")
     parser.add_argument("--num_eval_images", type=int, default=100,
                         help="Number of images for evaluation")
-    parser.add_argument("--batch_size", type=int, default=64,
+    parser.add_argument("--batch_size", type=int, default=36,
                         help="Minibatch size")
-    parser.add_argument("--lr", type=float, default=0.0015,
+    parser.add_argument("--lr", type=float, default=0.001,
                         help="Base learning rate")
     parser.add_argument("--beta1", type=float, default=.9, help="Adam/AMSGrad beta1")
     parser.add_argument("--beta2", type=float, default=.99, help="Adam/AMSGrad beta2")
     parser.add_argument("--adam_eps", type=float, default=10e-8, help="Adam/AMSGrad eps")
     parser.add_argument("--memory_saving_gradients", type=bool, default=False,
                         help="Use memory saving gradients")
-    parser.add_argument("--use_gradient_clipping", type=bool, default=True,
+    parser.add_argument("--use_gradient_clipping", type=bool, default=False,
                         help="Use gradient clipping")
                         
     # Model hyperparams:
-    parser.add_argument("--width", type=int, default=512,
+    parser.add_argument("--width", type=int, default=-1,
                         help="Width of hidden layers")
     parser.add_argument("--depth", type=int, default=4,
                         help="Depth of network")
