@@ -11,6 +11,7 @@ import ops
 import memory_saving_gradients
 import celeba
 
+
 global dataset
 dataset = celeba
 
@@ -48,7 +49,7 @@ def model_fn(features, labels, mode, params):
 
         f_loss = tf.reduce_mean(f_loss)
 
-        if not cfg.use_tpu:
+        if not cfg.use_tpu and cfg.report_histograms:
             for v in tf.trainable_variables():
                 tf.summary.histogram(v.name.replace(':', '_'), v)
         
@@ -145,7 +146,7 @@ def main(cfg):
         config=config,
         params={"cfg": cfg, "data_dir": cfg.data_dir},
         predict_batch_size=cfg.num_eval_images)
-
+        
     if cfg.mode == 'train':
         tf.gfile.MakeDirs(os.path.join(cfg.model_dir))
         tf.gfile.MakeDirs(os.path.join(cfg.model_dir, 'generated_images'))
@@ -156,7 +157,7 @@ def main(cfg):
             cfg.train_steps, current_step))
         while current_step < cfg.train_steps:
             next_checkpoint = min(
-                current_step + cfg.train_steps_per_eval, cfg.train_steps)
+                current_step + cfg.train_steps_per_eval, cfg.train_steps)                
             est.train(input_fn=dataset.InputFunction(
                 True), max_steps=next_checkpoint)
             current_step = next_checkpoint
@@ -195,9 +196,11 @@ if __name__ == "__main__":
                         help="Minibatch size")
     parser.add_argument("--lr", type=float, default=0.001,
                         help="Base learning rate")
-    parser.add_argument("--beta1", type=float, default=.9, help="Adam/AMSGrad beta1")
-    parser.add_argument("--beta2", type=float, default=.99, help="Adam/AMSGrad beta2")
-    parser.add_argument("--adam_eps", type=float, default=10e-8, help="Adam/AMSGrad eps")
+    parser.add_argument("--beta1", type=float, default=.9, help="beta1")
+    parser.add_argument("--beta2", type=float, default=.999, help="beta2")
+    parser.add_argument("--adam_eps", type=float, default=10e-5, help="eps")
+    parser.add_argument("--report_histograms", type=bool, default=False,
+                        help="If should report histograms")
     parser.add_argument("--memory_saving_gradients", type=bool, default=False,
                         help="Use memory saving gradients")
     parser.add_argument("--use_gradient_clipping", type=bool, default=False,
@@ -212,7 +215,7 @@ if __name__ == "__main__":
                         help="Weight of log p(y|x) in weighted loss")
     parser.add_argument("--n_bits_x", type=int, default=8,
                         help="Number of bits of x")
-    parser.add_argument("--n_levels", type=int, default=4,
+    parser.add_argument("--n_levels", type=int, default=5,
                         help="Number of levels")
     parser.add_argument("--n_y", type=int, default=1,
                         help="Number of final layer output")
@@ -242,8 +245,8 @@ if __name__ == "__main__":
                         help="Output model directory")
 
     cfg = parser.parse_args()
-    cfg.width_dict = {1: 512, 2: 512, 4: 512, 8: 256, 16: 512, 32: 512, 64: 512, 128: 64}
-    cfg.depth_dict = {0: 2, 1: 4, 2: 16, 3: 24, 4: 32, 5: 64}    
+    cfg.width_dict = {1: 512, 2: 512, 4: 512, 8: 256, 16: 256, 32: 256, 64: 128, 128: 64}
+    cfg.depth_dict = {0: 4, 1: 4, 2: 8, 3: 16, 4: 16, 5: 32}    
 
     tf.logging.set_verbosity(tf.logging.INFO)
     main(cfg)

@@ -73,12 +73,10 @@ def revnet2d_step(name, z1, z2, flip, logdet, cfg, reverse, is_training):
         else:
             if flip:
                 z2 = z2 - f_("f1", z1, cfg, is_training=is_training)
-                z2, logdet = ops.scale_bias(
-                    "actnorm", z2, logdet=logdet, reverse=True)
+                z2, logdet = ops.scale_bias("actnorm", z2, logdet=logdet, reverse=True)
             else:
                 z1 = z1 - f_("f1", z2, cfg, is_training=is_training)
-                z1, logdet = ops.scale_bias(
-                    "actnorm", z1, logdet=logdet, reverse=True)
+                z1, logdet = ops.scale_bias("actnorm", z1, logdet=logdet, reverse=True)
     return z1, z2, logdet
 
 
@@ -91,9 +89,9 @@ def f_(name, h, cfg, n_out=None, is_training=False):
     n_out = n_out or int(h.get_shape()[3])
     with tf.variable_scope(name):
         h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training, relu=True)        
-        #h = ops._conv2d("l_2", h, width, [3, 1], 1, is_training, relu=True)        
-        #h = ops._conv2d("l_3", h, width, [1, 3], 1, is_training, relu=True)
-        h = ops._conv2d("l_4", h, n_out, [3, 3], 1, is_training, relu=False, init_zero=True)
+        h = ops._conv2d("l_2", h, width, [3, 1], 1, is_training, relu=True)        
+        h = ops._conv2d("l_3", h, width, [1, 3], 1, is_training, relu=True)
+        h = ops._conv2d("l_4", h, n_out, [1, 1], 1, is_training, relu=False, init_zero=True)        
     return h
 
 
@@ -265,7 +263,7 @@ def prior(name, y_onehot, cfg):
 
     with tf.variable_scope(name):        
 
-        cfg.top_shape = [8, 8, 96]
+        cfg.top_shape = [4, 4, 192]
 
         n_z = cfg.top_shape[-1]
 

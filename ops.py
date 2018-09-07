@@ -36,19 +36,15 @@ def pixel_norm(x, epsilon=1e-8):
         return x * tf.rsqrt(tf.reduce_mean(tf.square(x), axis=3, keepdims=True) + epsilon)
 
 def _conv2d(name, inputs, filters, kernel_size, stride, is_training, init_zero=False, relu=False):
+    
     with tf.variable_scope(name):
         inputs = tf.layers.conv2d(
             inputs, filters, kernel_size,
             strides=[stride, stride], padding='same',
             bias_initializer=tf.zeros_initializer(),
-            use_bias=False,
-            kernel_initializer=tf.truncated_normal_initializer(stddev=0.01),
+            use_bias=True,
+            kernel_initializer=tf.truncated_normal_initializer(stddev=0.01),            
             name=name)
-        #if relu:
-        #    inputs = tf.nn.relu(inputs)
-        #else:
-        #    inputs = tf.sigmoid(inputs)
-        #inputs = pixel_norm(inputs)
         inputs = batch_norm_relu(
             "actnorm", inputs, is_training, relu=relu, init_zero=init_zero)
 
@@ -61,10 +57,9 @@ def _conv2d_zeros(x, filters, kernel_size, stride, name):
             x, filters, [kernel_size, kernel_size],
             strides=[stride, stride], padding='same',
             bias_initializer=tf.zeros_initializer(),
-            use_bias=True,
+            use_bias=False,
             kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
-            name="conv2d_zeros")
-        x *= tf.exp(tf.get_variable("logs",[1, filters], initializer=tf.zeros_initializer()))
+            name="conv2d_zeros")        
         return x
 
 def squeeze2d(x, factor=2):
@@ -297,8 +292,8 @@ def scale(name, x, scale=1., logdet=None, logscale_factor=3., reverse=False):
     elif len(shape) == 4:
         _shape = (1, 1, 1, int_shape(x)[3])
         logdet_factor = int(shape[1])*int(shape[2])
-    s = tf.get_variable(name, _shape, initializer=tf.ones_initializer()) + 1e-6
-    logs = tf.log(tf.abs(s))
+    s = tf.get_variable(name, _shape, initializer=tf.ones_initializer())
+    logs = tf.log(tf.abs(s) + 1e-6)
     if not reverse:
         x *= s
     else:
@@ -308,4 +303,4 @@ def scale(name, x, scale=1., logdet=None, logscale_factor=3., reverse=False):
         if reverse:
             dlogdet *= -1
         return x, logdet + dlogdet
-    return x
+    return x    
