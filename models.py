@@ -49,38 +49,38 @@ def revnet2d(index, name, z1, z2, logdet, cfg, is_training, reverse=False):
                 if cfg.memory_saving_gradients:
                     z1, z2, logdet = checkpoint(z1, z2, logdet)
                 z1, z2, logdet = revnet2d_step(
-                    str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)
+                    str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training, i == depth -1)
             if cfg.memory_saving_gradients:
                 z1, z2, logdet = checkpoint(z1, z2, logdet)
         else:
             for i in reversed(range(depth)):
                 z1, z2, logdet = revnet2d_step(
-                    str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training)
+                    str(i), z1, z2, i % 2 == 0, logdet, cfg, reverse, is_training, i == depth -1)
     return z1, z2, logdet
 
 # Simpler, new version
 
 
-def revnet2d_step(name, z1, z2, flip, logdet, cfg, reverse, is_training):
+def revnet2d_step(name, z1, z2, flip, logdet, cfg, reverse, is_training, last_layer):
     with tf.variable_scope(name):
         if not reverse:
             if flip:
                 z2, logdet = ops.scale_bias("actnorm", z2, logdet=logdet)
-                z2 = z2 + f_("f1", z1, cfg, is_training=is_training)
+                z2 = z2 + f_("f1", z1, cfg, is_training=is_training, last_layer=last_layer)
             else:
                 z1, logdet = ops.scale_bias("actnorm", z1, logdet=logdet)
-                z1 = z1 + f_("f1", z2, cfg, is_training=is_training)
+                z1 = z1 + f_("f1", z2, cfg, is_training=is_training, last_layer=last_layer)
         else:
             if flip:
-                z2 = z2 - f_("f1", z1, cfg, is_training=is_training)
+                z2 = z2 - f_("f1", z1, cfg, is_training=is_training, last_layer=last_layer)
                 z2, logdet = ops.scale_bias("actnorm", z2, logdet=logdet, reverse=True)
             else:
-                z1 = z1 - f_("f1", z2, cfg, is_training=is_training)
+                z1 = z1 - f_("f1", z2, cfg, is_training=is_training, last_layer=last_layer)
                 z1, logdet = ops.scale_bias("actnorm", z1, logdet=logdet, reverse=True)
     return z1, z2, logdet
 
 
-def f_(name, h, cfg, n_out=None, is_training=False):
+def f_(name, h, cfg, n_out=None, is_training=False, last_layer=False):
     width = cfg.width
     if width == -1:
         assert(int(h.get_shape()[1]) == int(h.get_shape()[2]))
@@ -88,17 +88,17 @@ def f_(name, h, cfg, n_out=None, is_training=False):
         width = cfg.width_dict[img_width]
     n_out = n_out or int(h.get_shape()[3])
     with tf.variable_scope(name):
-        h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training, relu=True)        
-        h = ops._conv2d("l_2", h, width, [3, 1], 1, is_training, relu=True)        
-        h = ops._conv2d("l_3", h, width, [1, 3], 1, is_training, relu=True)
-        h = ops._conv2d("l_4", h, n_out, [1, 1], 1, is_training, relu=False, init_zero=True)        
+        h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training)        
+        #h = ops._conv2d("l_2", h, width, [3, 1], 1, is_training, relu=True)        
+        #h = ops._conv2d("l_3", h, width, [1, 3], 1, is_training, relu=True)
+        h = ops._conv2d("l_4", h, n_out, [3, 3], 1, is_training, init_zero=True, has_bn=last_layer, has_pn=not last_layer)
     return h
 
 
 def split2d(name, z1, z2, objective=0.):
     with tf.variable_scope(name):
         pz = split2d_prior(z1)
-        objective += pz.logp(z2)
+        objective += pz.logp(z2)        
         eps = pz.get_eps(z2)
         z1 = ops.squeeze2d(z1)
         n_z1 = ops.int_shape(z1)[3]
@@ -114,13 +114,13 @@ def split2d_reverse(name, z1, z2, eps, eps_std):
         pz = split2d_prior(z1)
         if eps is not None:
             # Already sampled eps
-            z2 = pz.sample2(eps)
+            z2 = pz.sample_eps(eps)
         elif eps_std is not None:
             # Sample with given eps_std
-            z2 = pz.sample2(pz.eps * tf.reshape(eps_std, [-1, 1, 1, 1]))
+            z2 = pz.sample_eps(pz.eps * tf.reshape(eps_std, [-1, 1, 1, 1]))
         else:
             # Sample normally
-            z2 = pz.sample
+            z2 = pz.sample(1.0)
         return z1, z2
 
 
@@ -263,7 +263,7 @@ def prior(name, y_onehot, cfg):
 
     with tf.variable_scope(name):        
 
-        cfg.top_shape = [4, 4, 192]
+        cfg.top_shape = [2, 2, 384]
 
         n_z = cfg.top_shape[-1]
 
@@ -282,18 +282,16 @@ def prior(name, y_onehot, cfg):
         objective = pz.logp(z1)
         return objective
 
-    def sample(eps=None, eps_std=None, temp=None):
+    def sample(eps=None, eps_std=None, temp=1.0):
         if eps is not None:
             # Already sampled eps. Don't use eps_std
-            z = pz.sample2(eps)                
+            z = pz.sample_eps(eps)                
         elif eps_std is not None:
             # Sample with given eps_std
-            z = pz.sample2(pz.eps * tf.reshape(eps_std, [-1, 1, 1, 1]))
-        elif temp is not None:
-            z = pz.sample3(temp)
+            z = pz.sample_eps(pz.eps * tf.reshape(eps_std, [-1, 1, 1, 1]))
         else:
             # Sample normally
-            z = pz.sample
+            z = pz.sample(temp)
 
         return z
 
@@ -319,8 +317,9 @@ class model(object):
             y_onehot = tf.cast(tf.one_hot(y, self.cfg.n_y, 1, 0), 'float32')
 
             # Discrete -> Continuous
-            objective = tf.zeros_like(x, dtype='float32')[:, 0, 0, 0]            
-            z = x + tf.random_uniform(tf.shape(x), 0, 1./self.cfg.n_bins)
+            objective = tf.zeros_like(x, dtype='float32')[:, 0, 0, 0]        
+
+            z = x# + tf.random_uniform(tf.shape(x), 0, 1./self.cfg.n_bins)
             objective += - np.log(self.cfg.n_bins) * np.prod(ops.int_shape(z)[1:])
 
             # Encode
@@ -329,9 +328,9 @@ class model(object):
 
             # Prior
             self.cfg.top_shape = ops.int_shape(z)[1:]
-            logp, _, _ = prior("prior", y_onehot, self.cfg)            
+            logp, _, _ = prior("prior", y_onehot, self.cfg)                        
 
-            objective += logp(z)
+            objective += logp(z)            
 
             # Generative loss
             nobj = - objective

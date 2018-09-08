@@ -18,7 +18,7 @@ def parser(serialized_example):
     image = tf.image.decode_jpeg(features['image'])
     image = tf.cast(image, tf.float32)
     image = tf.reshape(image, [3, 128*128])
-    image += tf.truncated_normal(image.get_shape(), dtype = tf.float32, stddev=0.5)
+    image += (tf.random_uniform(image.get_shape(), dtype = tf.float32) * 0.5)
     image = tf.clip_by_value(image, 0.0, 255.0)
     image = image / 255.0 - 0.5
     # tf.cast(features['labels'], tf.int32)

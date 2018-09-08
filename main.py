@@ -49,12 +49,18 @@ def model_fn(features, labels, mode, params):
 
         f_loss = tf.reduce_mean(f_loss)
 
+        if cfg.use_l2_regularization:
+            for v in tf.trainable_variables():
+                if 'actnorm' not in v.name:
+                    f_loss += cfg.l2_regularization_factor * tf.nn.l2_loss(v)
+
         if not cfg.use_tpu and cfg.report_histograms:
             for v in tf.trainable_variables():
                 tf.summary.histogram(v.name.replace(':', '_'), v)
-        
+
+        lr = int(real_images.get_shape()[0]) * cfg.lr
         optimizer = tf.train.AdamOptimizer(
-            learning_rate=cfg.lr, beta1=cfg.beta1, epsilon=cfg.adam_eps)        
+            learning_rate=lr, beta1=cfg.beta1, epsilon=cfg.adam_eps)
 
         if cfg.use_tpu:
             optimizer = tpu_optimizer.CrossShardOptimizer(optimizer)
@@ -146,7 +152,7 @@ def main(cfg):
         config=config,
         params={"cfg": cfg, "data_dir": cfg.data_dir},
         predict_batch_size=cfg.num_eval_images)
-        
+
     if cfg.mode == 'train':
         tf.gfile.MakeDirs(os.path.join(cfg.model_dir))
         tf.gfile.MakeDirs(os.path.join(cfg.model_dir, 'generated_images'))
@@ -157,7 +163,7 @@ def main(cfg):
             cfg.train_steps, current_step))
         while current_step < cfg.train_steps:
             next_checkpoint = min(
-                current_step + cfg.train_steps_per_eval, cfg.train_steps)                
+                current_step + cfg.train_steps_per_eval, cfg.train_steps)
             est.train(input_fn=dataset.InputFunction(
                 True), max_steps=next_checkpoint)
             current_step = next_checkpoint
@@ -177,7 +183,7 @@ def main(cfg):
 
 
 if __name__ == "__main__":
-    
+
     import argparse
     parser = argparse.ArgumentParser()
 
@@ -192,9 +198,9 @@ if __name__ == "__main__":
                         help="Steps per interior TPU loop")
     parser.add_argument("--num_eval_images", type=int, default=100,
                         help="Number of images for evaluation")
-    parser.add_argument("--batch_size", type=int, default=32,
+    parser.add_argument("--batch_size", type=int, default=24,
                         help="Minibatch size")
-    parser.add_argument("--lr", type=float, default=0.001,
+    parser.add_argument("--lr", type=float, default=1.5625e-5,
                         help="Base learning rate")
     parser.add_argument("--beta1", type=float, default=.9, help="beta1")
     parser.add_argument("--beta2", type=float, default=.999, help="beta2")
@@ -205,7 +211,11 @@ if __name__ == "__main__":
                         help="Use memory saving gradients")
     parser.add_argument("--use_gradient_clipping", type=bool, default=False,
                         help="Use gradient clipping")
-                        
+    parser.add_argument("--use_l2_regularization", type=bool, default=False,
+                        help="Use L2 loss regularization on trainable variables")
+    parser.add_argument("--l2_regularization_factor", type=float,
+                        default=0.00005, help="L2 regularization factor")
+
     # Model hyperparams:
     parser.add_argument("--width", type=int, default=-1,
                         help="Width of hidden layers (-1 for width_dict)")
@@ -215,7 +225,7 @@ if __name__ == "__main__":
                         help="Weight of log p(y|x) in weighted loss")
     parser.add_argument("--n_bits_x", type=int, default=8,
                         help="Number of bits of x")
-    parser.add_argument("--n_levels", type=int, default=5,
+    parser.add_argument("--n_levels", type=int, default=6,
                         help="Number of levels")
     parser.add_argument("--n_y", type=int, default=1,
                         help="Number of final layer output")
@@ -245,8 +255,9 @@ if __name__ == "__main__":
                         help="Output model directory")
 
     cfg = parser.parse_args()
-    cfg.width_dict = {1: 512, 2: 512, 4: 512, 8: 256, 16: 256, 32: 256, 64: 128, 128: 64}
-    cfg.depth_dict = {0: 4, 1: 4, 2: 8, 3: 16, 4: 16, 5: 32}    
+    cfg.width_dict = {1: 512, 2: 512, 4: 512,
+                      8: 256, 16: 256, 32: 256, 64: 128, 128: 64}
+    cfg.depth_dict = {0: 4, 1: 8, 2: 16, 3: 32, 4: 32, 5: 64}
 
     tf.logging.set_verbosity(tf.logging.INFO)
     main(cfg)
