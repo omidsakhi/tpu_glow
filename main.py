@@ -49,10 +49,17 @@ def model_fn(features, labels, mode, params):
 
         f_loss = tf.reduce_mean(f_loss)
 
-        if cfg.use_l2_regularization:
+        with tf.variable_scope('Regularization'):
             for v in tf.trainable_variables():
-                if 'actnorm' not in v.name:
-                    f_loss += cfg.l2_regularization_factor * tf.nn.l2_loss(v)
+                if 'invw' in v.name:
+                    det = tf.matrix_determinant(v * tf.transpose(v))
+                    f_loss += 0.001 * tf.square(det)
+                    f_loss -= det
+
+            if cfg.use_l2_regularization:
+                for v in tf.trainable_variables():
+                    if 'actnorm' not in v.name:
+                        f_loss += cfg.l2_regularization_factor * tf.nn.l2_loss(v)
 
         if not cfg.use_tpu and cfg.report_histograms:
             for v in tf.trainable_variables():
@@ -259,7 +266,7 @@ if __name__ == "__main__":
     cfg = parser.parse_args()
     cfg.width_dict = {1: 512, 2: 512, 4: 512,
                       8: 256, 16: 256, 32: 256, 64: 128, 128: 64}
-    cfg.depth_dict = {0: 3, 1: 3, 2: 3, 3: 3, 4: 3}
+    cfg.depth_dict = {0: 4, 1: 4, 2: 4, 3: 4, 4: 4}
     #cfg.depth_dict = {0: 2, 1: 2, 2: 2, 3: 2, 4: 2}
 
     tf.logging.set_verbosity(tf.logging.INFO)

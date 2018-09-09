@@ -141,19 +141,20 @@ def invertible_1x1_conv(name, z, logdet, reverse=False):
             shape = ops.int_shape(z)
             C = shape[3]            
 
-            w = tf.get_variable("W", shape=(1, 1, C, C), dtype=tf.float32,initializer=tf.initializers.orthogonal())
-            
+            w = tf.get_variable("invw", shape=(C, C), dtype=tf.float32,initializer=tf.initializers.orthogonal())            
+
             dlogdet = tf.cast(tf.log(abs(tf.matrix_determinant(tf.cast(w, 'float64')))), 'float32') * shape[1]*shape[2]
 
             if not reverse:
-                
+                w = tf.reshape(w, [1,1,C,C])
                 z = tf.nn.conv2d(z, w, [1, 1, 1, 1],'SAME', data_format='NHWC')
                 logdet += dlogdet
 
                 return z, logdet
             else:
 
-                w = tf.matrix_inverse(w)                
+                w = tf.matrix_inverse(w)
+                w = tf.reshape(w, [1,1,C,C])            
                 z = tf.nn.conv2d(z, w, [1, 1, 1, 1],'SAME', data_format='NHWC')
                 logdet -= dlogdet
 
