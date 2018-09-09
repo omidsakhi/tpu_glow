@@ -58,7 +58,7 @@ def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
             z2 = z[:, :, :, n_z // 2:]
             h = f_("f1", z1, cfg, n_z, is_training=is_training)
             shift = h[:, :, :, 0::2]            
-            scale = tf.nn.sigmoid(h[:, :, :, 1::2] + 2.) + 1e-6
+            scale = tf.nn.sigmoid(h[:, :, :, 1::2]) + 0.1
             z2 += shift
             z2 *= scale
             logdet += tf.reduce_sum(tf.log(scale), axis=[1, 2, 3])
@@ -68,7 +68,7 @@ def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
             z2 = z[:, :, :, n_z // 2:]
             h = f_("f1", z1, cfg, n_z, is_training=is_training)            
             shift = h[:, :, :, 0::2]            
-            scale = tf.nn.sigmoid(h[:, :, :, 1::2] + 2.) + 1e-6
+            scale = tf.nn.sigmoid(h[:, :, :, 1::2]) + 0.1
             z2 /= scale
             z2 -= shift
             logdet -= tf.reduce_sum(tf.log(scale), axis=[1, 2, 3])
