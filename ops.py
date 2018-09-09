@@ -47,24 +47,18 @@ def channel_scale(x):
     with tf.variable_scope('ChannelScale'):        
         return x * tf.get_variable('scale', _shape, initializer=tf.zeros_initializer())
 
-def _conv2d(name, inputs, filters, kernel_size, stride, is_training, init_zero=False, has_bn=False, has_pn=False):
+def _conv2d(name, inputs, filters, kernel_size, stride, is_training, relu=True, init_zero=False):
     
     with tf.variable_scope(name):
         inputs = tf.layers.conv2d(
             inputs, filters, kernel_size,
             strides=[stride, stride], padding='same',
             bias_initializer=tf.zeros_initializer(),
-            use_bias=not has_bn,
+            use_bias=False,
             kernel_initializer=default_initializer(),            
             name=name)
-        if has_bn:
-            inputs = batch_norm_relu(
-                "BatchNorm", inputs, is_training, relu=True, init_zero=init_zero)
-        else:
-            inputs = tf.nn.relu(inputs)
-            if has_pn:
-                inputs = pixel_norm(inputs)            
-                inputs = channel_scale(inputs)
+        inputs = batch_norm_relu(
+            "bachnorm", inputs, is_training, relu=relu, init_zero=init_zero)
         return inputs
 
 def _conv2d_zeros(x, filters, kernel_size, stride, name):
@@ -73,16 +67,15 @@ def _conv2d_zeros(x, filters, kernel_size, stride, name):
             x, filters, [kernel_size, kernel_size],
             strides=[stride, stride], padding='same',
             bias_initializer=tf.zeros_initializer(),
-            use_bias=True,
+            use_bias=False,
             kernel_initializer=default_initializer(),
-            name="conv2d_zeros")
-        x = channel_scale(x)            
+            name="conv2d_zeros")        
         return x
 
 def squeeze2d(x, factor=2):
 
-    x = tf.space_to_depth(x, factor)
-    '''
+    #x = tf.space_to_depth(x, factor)
+    
     assert factor >= 1
     if factor == 1:
         return x
@@ -96,15 +89,15 @@ def squeeze2d(x, factor=2):
     x = tf.transpose(x, [0, 1, 3, 5, 2, 4])
     x = tf.reshape(x, [-1, height//factor, width //
                        factor, n_channels*factor*factor])    
-    '''
+    
     return x
 
 
 def unsqueeze2d(x, factor=2):
 
-    x = tf.depth_to_space(x, factor)
+    #x = tf.depth_to_space(x, factor)
 
-    '''
+    
     assert factor >= 1
     if factor == 1:
         return x
@@ -118,7 +111,7 @@ def unsqueeze2d(x, factor=2):
     x = tf.transpose(x, [0, 1, 4, 2, 5, 3])
     x = tf.reshape(x, (-1, int(height*factor),
                        int(width*factor), int(n_channels/factor**2)))
-    '''
+    
     return x
 
 # Reverse features across channel dimension
@@ -215,9 +208,9 @@ def gaussian_diag(mean, logsd):
     o.sample_eps = staticmethod(lambda eps: mean + tf.exp(logsd) * eps)
     o.sample = staticmethod(lambda temp: mean + tf.exp(logsd) * o.eps * temp)
     o.logps = staticmethod(lambda x: -0.5 * (np.log(2 * np.pi) +
-                                             2. * logsd + tf.square((x - mean)) / tf.exp(2. * logsd)))
+                                             2. * logsd + tf.square((x - mean)) / (tf.exp(2. * logsd) + 1e-6)))
     o.logp = staticmethod(lambda x: flatten_sum(o.logps(x)))
-    o.get_eps = staticmethod(lambda x: (x - mean) / tf.exp(logsd))
+    o.get_eps = staticmethod(lambda x: (x - mean) / (tf.exp(logsd) + 1e-6))
     return o
 
 
@@ -308,8 +301,8 @@ def scale(name, x, scale=1., logdet=None, logscale_factor=3., reverse=False):
     elif len(shape) == 4:
         _shape = (1, 1, 1, int_shape(x)[3])
         logdet_factor = int(shape[1])*int(shape[2])
-    s = tf.get_variable(name, _shape, initializer=tf.ones_initializer()) + 1e-4
-    logs = tf.log(tf.abs(s))
+    s = tf.get_variable(name, _shape, initializer=tf.ones_initializer())
+    logs = tf.log(tf.abs(s) + 1e-4)
     if not reverse:
         x *= s
     else:
