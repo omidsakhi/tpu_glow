@@ -11,7 +11,7 @@ def codec(cfg):
             z, objective = revnet2d(i,str(i), z, objective, cfg, is_training=is_training)
             if i < cfg.n_levels-1:
                 z, objective, _eps = split2d("pool"+str(i), z, objective=objective)
-                eps.append(_eps)        
+                eps.append(_eps)
         return z, objective, eps
 
     def decoder(z, is_training, eps=[None]*cfg.n_levels, eps_std=None):        
@@ -140,7 +140,7 @@ def invertible_1x1_conv(name, z, logdet, reverse=False):
             shape = ops.int_shape(z)
             C = shape[3]            
 
-            w = tf.get_variable("invw", shape=(C, C), dtype=tf.float32,initializer=tf.initializers.orthogonal())            
+            w = tf.get_variable("w", shape=(C, C), dtype=tf.float32,initializer=tf.initializers.orthogonal())
 
             dlogdet = tf.cast(tf.log(abs(tf.matrix_determinant(tf.cast(w, 'float64')))), 'float32') * shape[1]*shape[2]
 

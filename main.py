@@ -6,6 +6,8 @@ from tensorflow.contrib.tpu.python.tpu import tpu_config  # pylint: disable=E061
 from tensorflow.contrib.tpu.python.tpu import tpu_estimator  # pylint: disable=E0611
 from tensorflow.contrib.tpu.python.tpu import tpu_optimizer  # pylint: disable=E0611
 from tensorflow.python.estimator import estimator  # pylint: disable=E0611
+from tensorboard.plugins.beholder import Beholder
+from tensorboard.plugins.beholder import BeholderHook
 import math
 import ops
 import memory_saving_gradients
@@ -51,7 +53,7 @@ def model_fn(features, labels, mode, params):
 
         with tf.variable_scope('Regularization'):
             for v in tf.trainable_variables():
-                if 'invw' in v.name:
+                if 'invconv' in v.name:
                     det = tf.matrix_determinant(v * tf.transpose(v))
                     f_loss += 0.001 * tf.square(det)
                     f_loss -= det
@@ -173,6 +175,7 @@ def main(cfg):
         while current_step < cfg.train_steps:
             next_checkpoint = min(
                 current_step + cfg.train_steps_per_eval, cfg.train_steps)
+            #hooks=[BeholderHook(cfg.model_dir)]
             est.train(input_fn=dataset.InputFunction(
                 True), max_steps=next_checkpoint)
             current_step = next_checkpoint
@@ -266,7 +269,7 @@ if __name__ == "__main__":
     cfg = parser.parse_args()
     cfg.width_dict = {1: 512, 2: 512, 4: 512,
                       8: 256, 16: 256, 32: 256, 64: 128, 128: 64}
-    cfg.depth_dict = {0: 4, 1: 4, 2: 4, 3: 6, 4: 6}
+    cfg.depth_dict = {0: 6, 1: 6, 2: 6, 3: 6, 4: 6}
     #cfg.depth_dict = {0: 2, 1: 2, 2: 2, 3: 2, 4: 2}
 
     tf.logging.set_verbosity(tf.logging.INFO)
