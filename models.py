@@ -58,20 +58,20 @@ def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
             z2 = z[:, :, :, n_z // 2:]
             h = f_("f1", z1, cfg, n_z, is_training=is_training)
             shift = h[:, :, :, 0::2]            
-            scale = tf.nn.sigmoid(h[:, :, :, 1::2]) + 0.1
+            logs = h[:, :, :, 1::2] / 4.0            
             z2 += shift
-            z2 *= scale
-            logdet += tf.reduce_sum(tf.log(scale), axis=[1, 2, 3])
+            z2 *= tf.exp(logs)
+            logdet += tf.reduce_sum(logs, axis=[1, 2, 3])
             z = tf.concat([z1, z2], 3)
         else:
             z1 = z[:, :, :, :n_z // 2]
             z2 = z[:, :, :, n_z // 2:]
             h = f_("f1", z1, cfg, n_z, is_training=is_training)            
             shift = h[:, :, :, 0::2]            
-            scale = tf.nn.sigmoid(h[:, :, :, 1::2]) + 0.1
-            z2 /= scale
+            logs = h[:, :, :, 1::2] / 4.0
+            z2 *= tf.exp(-1.0 * logs)
             z2 -= shift
-            logdet -= tf.reduce_sum(tf.log(scale), axis=[1, 2, 3])
+            logdet -= tf.reduce_sum(logs, axis=[1, 2, 3])
             z = tf.concat([z1, z2], 3)
             #z = ops.reverse_features("reverse", z)
             z, logdet = invertible_1x1_conv("invconv", z, logdet, reverse=True)
@@ -79,7 +79,7 @@ def revnet2d_step(name, z, logdet, cfg, reverse, is_training):
     return z, logdet
 
 
-def f_(name, h, cfg, n_out=None, is_training=False, last_layer=False):
+def f_(name, h, cfg, n_out=None, is_training=False):
     width = cfg.width
     if width == -1:
         assert(int(h.get_shape()[1]) == int(h.get_shape()[2]))
@@ -87,10 +87,9 @@ def f_(name, h, cfg, n_out=None, is_training=False, last_layer=False):
         width = cfg.width_dict[img_width]
     n_out = n_out or int(h.get_shape()[3])
     with tf.variable_scope(name):
-        h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training)        
-        #h = ops._conv2d("l_2", h, width, [3, 1], 1, is_training, relu=True)        
-        #h = ops._conv2d("l_3", h, width, [1, 3], 1, is_training, relu=True)
-        h = ops._conv2d("l_4", h, n_out, [3, 3], 1, is_training, relu=False, init_zero=True)
+        h = ops._conv2d("l_1", h, width, [3, 3], 1, is_training, relu=True)        
+        h = ops._conv2d("l_2", h, 2 * width, [1, 1], 1, is_training, relu=True)                
+        h = ops._conv2d("l_3", h, n_out, [3, 3], 1, is_training, relu=False, init_zero=True, pn=True)
     return h
 
 def split2d(name, z, objective=0.):

@@ -266,7 +266,7 @@ if __name__ == "__main__":
     cfg = parser.parse_args()
     cfg.width_dict = {1: 512, 2: 512, 4: 512,
                       8: 256, 16: 256, 32: 256, 64: 128, 128: 64}
-    cfg.depth_dict = {0: 4, 1: 4, 2: 4, 3: 4, 4: 4}
+    cfg.depth_dict = {0: 4, 1: 4, 2: 4, 3: 6, 4: 6}
     #cfg.depth_dict = {0: 2, 1: 2, 2: 2, 3: 2, 4: 2}
 
     tf.logging.set_verbosity(tf.logging.INFO)

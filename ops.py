@@ -47,18 +47,22 @@ def channel_scale(x):
     with tf.variable_scope('ChannelScale'):        
         return x * tf.get_variable('scale', _shape, initializer=tf.zeros_initializer())
 
-def _conv2d(name, inputs, filters, kernel_size, stride, is_training, relu=True, init_zero=False):
+def _conv2d(name, inputs, filters, kernel_size, stride, is_training, relu=False, init_zero=False, pn=False):
     
     with tf.variable_scope(name):
         inputs = tf.layers.conv2d(
             inputs, filters, kernel_size,
             strides=[stride, stride], padding='same',
             bias_initializer=tf.zeros_initializer(),
-            use_bias=False,
+            use_bias=True,
             kernel_initializer=default_initializer(),            
             name=name)
-        inputs = batch_norm_relu(
-            "bachnorm", inputs, is_training, relu=relu, init_zero=init_zero)
+        if relu:
+            inputs = tf.nn.relu(inputs)
+        if pn:
+            inputs = pixel_norm(inputs)
+        if init_zero:            
+            inputs = channel_scale(inputs)
         return inputs
 
 def _conv2d_zeros(x, filters, kernel_size, stride, name):
@@ -198,6 +202,13 @@ def batch_norm_relu(name, inputs, is_training, relu=True, init_zero=False):
 def standard_gaussian(shape):
     return gaussian_diag(tf.zeros(shape), tf.zeros(shape))
 
+@tf.custom_gradient
+def div_by_exp(x, y):
+    exp_y = tf.exp(y) + 1e-6
+    ret = x / exp_y
+    def _grad(dy):
+        return dy/exp_y, dy*-ret
+    return ret, _grad
 
 def gaussian_diag(mean, logsd):    
     class o(object):
@@ -208,9 +219,9 @@ def gaussian_diag(mean, logsd):
     o.sample_eps = staticmethod(lambda eps: mean + tf.exp(logsd) * eps)
     o.sample = staticmethod(lambda temp: mean + tf.exp(logsd) * o.eps * temp)
     o.logps = staticmethod(lambda x: -0.5 * (np.log(2 * np.pi) +
-                                             2. * logsd + tf.square((x - mean)) / (tf.exp(2. * logsd) + 1e-6)))
+                                             2. * logsd + div_by_exp(tf.square(x - mean),2. * logsd)))
     o.logp = staticmethod(lambda x: flatten_sum(o.logps(x)))
-    o.get_eps = staticmethod(lambda x: (x - mean) / (tf.exp(logsd) + 1e-6))
+    o.get_eps = staticmethod(lambda x: div_by_exp(x - mean, logsd))
     return o
 
 
@@ -301,12 +312,11 @@ def scale(name, x, scale=1., logdet=None, logscale_factor=3., reverse=False):
     elif len(shape) == 4:
         _shape = (1, 1, 1, int_shape(x)[3])
         logdet_factor = int(shape[1])*int(shape[2])
-    s = tf.get_variable(name, _shape, initializer=tf.ones_initializer())
-    logs = tf.log(tf.abs(s) + 1e-4)
+    logs = tf.get_variable(name, _shape, initializer=tf.zeros_initializer()) / 4.0
     if not reverse:
-        x *= s
+        x *= tf.exp(logs)
     else:
-        x /= s
+        x *= tf.exp(-1.0 * logs)
     if logdet != None:
         dlogdet =  tf.reduce_sum(logs) * logdet_factor
         if reverse:
