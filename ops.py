@@ -11,8 +11,8 @@ def int_shape(x):
         return list(map(int, x.get_shape()))
     return [-1]+list(map(int, x.get_shape()[1:]))
 
-def default_initializer(std=0.01):
-    return tf.random_normal_initializer(0., std)    
+def default_initializer():
+    return tf.variance_scaling_initializer()
 
 def dense(name, inputs, channels, is_training, has_bn=True, init_zero=False, relu=False):
     with tf.variable_scope(name):
@@ -47,7 +47,7 @@ def channel_scale(x):
     with tf.variable_scope('ChannelScale'):        
         return x * tf.get_variable('scale', _shape, initializer=tf.zeros_initializer())
 
-def _conv2d(name, inputs, filters, kernel_size, stride, is_training, relu=False, init_zero=False, pn=False):
+def _conv2d(name, inputs, filters, kernel_size, stride, relu=False, init_zero=False, pn=False):
     
     with tf.variable_scope(name):
         inputs = tf.layers.conv2d(
@@ -60,26 +60,15 @@ def _conv2d(name, inputs, filters, kernel_size, stride, is_training, relu=False,
         if relu:
             inputs = tf.nn.relu(inputs)
         if pn:
-            inputs = pixel_norm(inputs)
+           inputs = pixel_norm(inputs)
         if init_zero:            
             inputs = channel_scale(inputs)
         return inputs
 
-def _conv2d_zeros(x, filters, kernel_size, stride, name):
-    with tf.variable_scope(name):
-        x = tf.layers.conv2d(
-            x, filters, [kernel_size, kernel_size],
-            strides=[stride, stride], padding='same',
-            bias_initializer=tf.zeros_initializer(),
-            use_bias=False,
-            kernel_initializer=default_initializer(),
-            name="conv2d_zeros")        
-        return x
-
 def squeeze2d(x, factor=2):
 
-    #x = tf.space_to_depth(x, factor)
-    
+    x = tf.space_to_depth(x, factor)
+    '''
     assert factor >= 1
     if factor == 1:
         return x
@@ -93,15 +82,15 @@ def squeeze2d(x, factor=2):
     x = tf.transpose(x, [0, 1, 3, 5, 2, 4])
     x = tf.reshape(x, [-1, height//factor, width //
                        factor, n_channels*factor*factor])    
-    
+    '''
     return x
 
 
 def unsqueeze2d(x, factor=2):
 
-    #x = tf.depth_to_space(x, factor)
+    x = tf.depth_to_space(x, factor)
 
-    
+    '''
     assert factor >= 1
     if factor == 1:
         return x
@@ -115,7 +104,7 @@ def unsqueeze2d(x, factor=2):
     x = tf.transpose(x, [0, 1, 4, 2, 5, 3])
     x = tf.reshape(x, (-1, int(height*factor),
                        int(width*factor), int(n_channels/factor**2)))
-    
+    '''
     return x
 
 # Reverse features across channel dimension

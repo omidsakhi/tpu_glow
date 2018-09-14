@@ -35,14 +35,14 @@ def model_fn(features, labels, mode, params):
         # PREDICT #
         ###########
         predictions = {
-            'generated_images': model.sample(y, is_training=False, temp=0.75)
+            'generated_images': model.sample(y, temp=0.75)
         }
         return tpu_estimator.TPUEstimatorSpec(mode=mode, predictions=predictions)
 
     is_training = (mode == tf.estimator.ModeKeys.TRAIN)
     real_images = features['real_images']
 
-    f_loss, eps = model.f_loss(real_images, y, is_training)
+    f_loss, eps = model.f_loss(real_images, y)
 
     if mode == tf.estimator.ModeKeys.TRAIN:
         #########
@@ -55,8 +55,7 @@ def model_fn(features, labels, mode, params):
             for v in tf.trainable_variables():
                 if 'invconv' in v.name:
                     det = tf.matrix_determinant(v * tf.transpose(v))
-                    f_loss += 0.001 * tf.square(det)
-                    f_loss -= det
+                    f_loss += tf.square(det - 1)                    
 
             if cfg.use_l2_regularization:
                 for v in tf.trainable_variables():
@@ -66,12 +65,16 @@ def model_fn(features, labels, mode, params):
         if not cfg.use_tpu and cfg.report_histograms:
             for v in tf.trainable_variables():
                 tf.summary.histogram(v.name.replace(':', '_'), v)
-
+        
+        global_step = tf.train.get_or_create_global_step()   
+        rate = tf.minimum(tf.cast(global_step, tf.float32) / 2000.0, 1.0)
         #lr = int(real_images.get_shape()[0]) * cfg.lr
-        lr = cfg.lr
-        from AMSGrad import AMSGrad
-        optimizer = AMSGrad(
+        lr = cfg.lr * rate
+        #from AMSGrad import AMSGrad
+        optimizer = tf.train.AdamOptimizer(
             learning_rate=lr, beta1=cfg.beta1, epsilon=cfg.adam_eps)        
+
+        tf.summary.scalar('lr', lr)   
 
         if cfg.use_tpu:
             optimizer = tpu_optimizer.CrossShardOptimizer(optimizer)
@@ -235,9 +238,9 @@ if __name__ == "__main__":
                         help="Depth of network (-1 for depth_dict)")
     parser.add_argument("--weight_y", type=float, default=0.00,
                         help="Weight of log p(y|x) in weighted loss")
-    parser.add_argument("--n_bits_x", type=int, default=16,
+    parser.add_argument("--n_bits_x", type=int, default=8,
                         help="Number of bits of x")
-    parser.add_argument("--n_levels", type=int, default=5,
+    parser.add_argument("--n_levels", type=int, default=7,
                         help="Number of levels")
     parser.add_argument("--n_y", type=int, default=1,
                         help="Number of final layer output")
@@ -261,7 +264,7 @@ if __name__ == "__main__":
                         help="GCE zone where the Cloud TPU is located in")
 
     # dataset
-    parser.add_argument("--data_dir", type=str, default='gs://BUCKET/dataset' if USE_TPU else './dataset',
+    parser.add_argument("--data_dir", type=str, default='gs://BUCKET/dataset' if USE_TPU else 'C:/Projects/datasets/tfr-celeba128',
                         help="Bucket/Folder that contains the data tfrecord files")
     parser.add_argument("--model_dir", type=str, default='gs://BUCKET/output' if USE_TPU else './output',
                         help="Output model directory")
@@ -269,7 +272,7 @@ if __name__ == "__main__":
     cfg = parser.parse_args()
     cfg.width_dict = {1: 512, 2: 512, 4: 512,
                       8: 256, 16: 256, 32: 256, 64: 128, 128: 64}
-    cfg.depth_dict = {0: 6, 1: 6, 2: 6, 3: 6, 4: 6}
+    cfg.depth_dict = {0: 4, 1: 4, 2: 4, 3: 4, 4: 4, 5:4, 6:4}
     #cfg.depth_dict = {0: 2, 1: 2, 2: 2, 3: 2, 4: 2}
 
     tf.logging.set_verbosity(tf.logging.INFO)
